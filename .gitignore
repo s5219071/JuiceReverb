@@ -1,0 +1,33 @@
+# CMake build output
+build/
+cmake-build-*/
+out/
+tools/
+
+# JUCE/IDE generated files
+Builds/
+JuceLibraryCode/
+
+# Visual Studio files
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+x64/
+Win32/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+
+# Plugin build products
+*.vst3/
+*.component/
+*.aaxplugin/

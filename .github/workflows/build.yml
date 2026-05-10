@@ -1,0 +1,94 @@
+name: Build Windows VST3
+
+# ==============================================================================
+# GitHub Actions 워크플로우
+#
+# 이 파일은 GitHub 서버에게 다음 작업을 시킵니다.
+#
+# 1. Windows 빌드 서버를 준비한다.
+# 2. 저장소 코드를 내려받는다.
+# 3. CMake로 JUCE 프로젝트를 설정한다.
+# 4. BeatRepeater VST3를 빌드한다.
+# 5. BeatRepeater.vst3를 Artifact로 업로드한다.
+#
+# Artifact는 빌드가 끝난 뒤 GitHub 웹페이지에서 다운로드할 수 있는 결과물입니다.
+# ==============================================================================
+
+on:
+  # GitHub 웹사이트에서 버튼으로 직접 빌드 시작할 수 있게 하는 설정입니다.
+  workflow_dispatch:
+
+  # main 또는 master 브랜치에 코드를 올릴 때 자동 빌드합니다.
+  push:
+    branches:
+      - main
+      - master
+
+  # Pull Request를 만들 때도 빌드가 되는지 확인합니다.
+  pull_request:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-vst3:
+    name: Build BeatRepeater VST3 on Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Show build tools
+        shell: pwsh
+        run: |
+          cmake --version
+          git --version
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build VST3
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target BeatRepeater_VST3 --parallel
+
+      - name: Collect VST3 artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # JUCE CMake 빌드는 보통 아래와 비슷한 위치에 VST3를 만듭니다.
+          # build/BeatRepeater_artefacts/Release/VST3/BeatRepeater.vst3
+          #
+          # 하지만 JUCE/CMake 버전에 따라 중간 폴더명이 조금 달라질 수 있으므로,
+          # build 폴더 전체에서 BeatRepeater.vst3 폴더를 직접 찾습니다.
+          $vst3 = Get-ChildItem -Path "build" -Recurse -Directory -Filter "BeatRepeater.vst3" | Select-Object -First 1
+
+          if ($null -eq $vst3) {
+            Write-Host "Build folder contents:"
+            Get-ChildItem -Path "build" -Recurse | Select-Object -ExpandProperty FullName
+            throw "BeatRepeater.vst3 was not found. The build may have failed or the output path changed."
+          }
+
+          New-Item -ItemType Directory -Force -Path "artifacts" | Out-Null
+          Copy-Item -LiteralPath $vst3.FullName -Destination "artifacts" -Recurse -Force
+
+          Write-Host "Collected VST3 from:"
+          Write-Host $vst3.FullName
+
+          Write-Host "Artifact contents:"
+          Get-ChildItem -Path "artifacts" -Recurse | Select-Object -ExpandProperty FullName
+
+      - name: Upload VST3 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: BeatRepeater-Windows-VST3
+          path: artifacts/BeatRepeater.vst3
+          if-no-files-found: error
+          retention-days: 14
