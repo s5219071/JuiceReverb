@@ -10,7 +10,7 @@
 //
 // 쉽게 말하면:
 // - 사용자가 보는 배경색
-// - GRID 선택 박스
+// - LENGTH 노브
 // - SOFTNESS 노브
 // - 글자 색상
 // - 노브와 실제 소리 파라미터의 연결
@@ -54,16 +54,6 @@ private:
                                float rotaryEndAngle,
                                juce::Slider& slider) override;
 
-        // ComboBox의 테두리와 배경을 그립니다.
-        void drawComboBox (juce::Graphics& g,
-                           int width,
-                           int height,
-                           bool isButtonDown,
-                           int buttonX,
-                           int buttonY,
-                           int buttonW,
-                           int buttonH,
-                           juce::ComboBox& box) override;
     };
 
     //==============================================================================
@@ -71,9 +61,12 @@ private:
 
     NeonLookAndFeel neonLookAndFeel;
 
-    // GRID 라벨과 선택 박스입니다.
-    juce::Label gridLabel;
-    juce::ComboBox gridComboBox;
+    // LENGTH 라벨과 로터리 슬라이더입니다.
+    //
+    // 내부 파라미터 ID는 예전 프로젝트 호환성을 위해 "grid"를 유지하지만,
+    // 사용자가 보는 UI에서는 Length 노브로 보여줍니다.
+    juce::Label lengthLabel;
+    juce::Slider lengthSlider;
 
     // SOFTNESS 라벨과 로터리 슬라이더입니다.
     juce::Label softnessLabel;
@@ -89,12 +82,10 @@ private:
     // - 실제 소리가 바뀜
     //
     // 이 Attachment가 없으면 UI는 움직여도 실제 소리는 바뀌지 않습니다.
-    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
 
-    std::unique_ptr<ComboBoxAttachment> gridAttachment;
+    std::unique_ptr<SliderAttachment> lengthAttachment;
     std::unique_ptr<SliderAttachment> softnessAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BeatRepeaterAudioProcessorEditor)
 };
-

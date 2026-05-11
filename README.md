@@ -5,9 +5,12 @@ BeatRepeater is a JUCE-based Windows/macOS VST3 audio effect plugin.
 Core features:
 
 - Host BPM and PPQ synced beat repeat
-- Grid length selection from 1/1 to 1/32
+- Length macro selection from 1/1 to 1/32
 - Circular buffer based audio capture and repeat playback
 - Softness/Warmth control using short crossfade and low-pass filtering
+- One-knob mastering macro driven by Length:
+  low-end anchoring, de-mud filtering, transient lift, tape-style saturation,
+  stereo focus, and soft limiting
 - Dark neon blue plugin editor UI
 - GitHub Actions workflow for Windows and macOS VST3 cloud builds
 

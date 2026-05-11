@@ -10,6 +10,8 @@ namespace
     //
     // 한 번 배포한 뒤에는 ID를 바꾸지 않는 것이 좋습니다.
     // ID가 바뀌면 기존 DAW 프로젝트에서 저장된 automation이 끊길 수 있습니다.
+    //
+    // 그래서 UI에는 "Length"라고 보여도 내부 ID는 기존 "grid"를 유지합니다.
     constexpr const char* gridParamID     = "grid";
     constexpr const char* softnessParamID = "softness";
 
@@ -33,7 +35,7 @@ BeatRepeaterAudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
-    // Grid는 반복될 오디오 조각의 길이를 정하는 파라미터입니다.
+    // Length는 반복될 오디오 조각의 길이를 정하는 파라미터입니다.
     //
     // 1/1  = 온음표 길이
     // 1/2  = 2분음표 길이
@@ -43,7 +45,7 @@ BeatRepeaterAudioProcessor::createParameterLayout()
     // 1/32 = 32분음표 길이
     params.push_back (std::make_unique<juce::AudioParameterChoice>(
         gridParamID,
-        "Grid",
+        "Length",
         juce::StringArray { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32" },
         3)); // 기본값은 1/8입니다.
 
@@ -190,6 +192,9 @@ void BeatRepeaterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
 
     // Low-pass Filter 상태도 채널 수에 맞춰 준비합니다.
     lowpassState.assign (static_cast<size_t> (safeNumChannels), 0.0f);
+    wetLowControlState.assign (static_cast<size_t> (safeNumChannels), 0.0f);
+    dryLowAnchorState.assign (static_cast<size_t> (safeNumChannels), 0.0f);
+    transientDetectorState.assign (static_cast<size_t> (safeNumChannels), 0.0f);
 
     writePosition = 0;
     repeatStartPosition = 0;
@@ -253,7 +258,10 @@ void BeatRepeaterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         || numSamples <= 0
         || circularBufferSize <= 0
         || circularBuffer.getNumChannels() < numChannels
-        || static_cast<int> (lowpassState.size()) < numChannels)
+        || static_cast<int> (lowpassState.size()) < numChannels
+        || static_cast<int> (wetLowControlState.size()) < numChannels
+        || static_cast<int> (dryLowAnchorState.size()) < numChannels
+        || static_cast<int> (transientDetectorState.size()) < numChannels)
     {
         return;
     }
@@ -262,6 +270,18 @@ void BeatRepeaterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const float softnessPercent = apvts.getRawParameterValue (softnessParamID)->load();
 
     const float softness = juce::jlimit (0.0f, 1.0f, softnessPercent / 100.0f);
+
+    // Length Macro
+    //
+    // gridIndex는 0~5입니다.
+    //
+    // 0 = 1/1, 아주 긴 반복
+    // 5 = 1/32, 아주 짧은 반복
+    //
+    // 아래 lengthMacro는 "짧은 반복일수록 값이 커지는 0~1 매크로"입니다.
+    // 이 값 하나로 마스터링 엔지니어가 보통 신경 쓰는 부분들,
+    // 즉 저역 안정감, 피크 안전장치, 어택, 스테레오 폭, 질감 보정을 자동으로 움직입니다.
+    const float lengthMacro = juce::jlimit (0.0f, 1.0f, static_cast<float> (gridIndex) / 5.0f);
 
     // 사용자가 Grid를 바꾸면 기존 반복 위치와 새 Grid 위치가 어긋날 수 있습니다.
     // 그래서 Grid 변경을 감지하면 다음 sample에서 기준을 다시 잡습니다.
@@ -362,6 +382,65 @@ void BeatRepeaterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const float lowpassCoeff = 1.0f - std::exp (
         -juce::MathConstants<float>::twoPi * cutoffHz / static_cast<float> (sampleRateHz));
 
+    //==========================================================================
+    // Mastering Macro 계산
+    //
+    // 여기부터는 사용자가 별도 노브를 만지지 않아도 Length 값에 따라 자동으로 움직이는
+    // 고급 보정 영역입니다.
+    //
+    // 마스터링 엔지니어 관점에서 Beat Repeat가 약하게 들리는 흔한 이유:
+    // - 짧은 반복에서 저역이 겹쳐 킥/베이스가 흐려짐
+    // - 반복 구간의 어택이 죽어서 앞으로 튀어나오지 않음
+    // - 전체 레벨이 갑자기 커지거나 피크가 튀어 DAW에서 거칠게 들림
+    // - 스테레오 폭이 과하게 흔들려 중심이 약해짐
+    //
+    // 아래 값들은 그 문제를 Length 하나로 자동 보정합니다.
+    //==========================================================================
+
+    // 짧은 Length일수록 반복음의 저역을 조금 더 정리합니다.
+    const float deMudCutoffHz = juce::jlimit (20.0f,
+                                              nyquistHz * 0.85f,
+                                              juce::jmap (lengthMacro, 45.0f, 155.0f));
+
+    const float deMudCoeff = 1.0f - std::exp (
+        -juce::MathConstants<float>::twoPi * deMudCutoffHz / static_cast<float> (sampleRateHz));
+
+    // 원본 입력의 아주 낮은 대역을 살짝 남겨두는 "저역 앵커"입니다.
+    // 짧은 반복일수록 킥/베이스 중심이 사라지기 쉬우므로 더 많이 보존합니다.
+    const float dryLowCutoffHz = juce::jlimit (20.0f,
+                                               nyquistHz * 0.85f,
+                                               juce::jmap (lengthMacro, 75.0f, 145.0f));
+
+    const float dryLowCoeff = 1.0f - std::exp (
+        -juce::MathConstants<float>::twoPi * dryLowCutoffHz / static_cast<float> (sampleRateHz));
+
+    // 트랜지언트는 소리의 앞부분, 즉 어택감입니다.
+    // 반복음이 흐릿하게 느껴질 때 존재감을 살짝 되살립니다.
+    const float transientCutoffHz = juce::jlimit (100.0f,
+                                                  nyquistHz * 0.85f,
+                                                  juce::jmap (lengthMacro, 900.0f, 2400.0f));
+
+    const float transientCoeff = 1.0f - std::exp (
+        -juce::MathConstants<float>::twoPi * transientCutoffHz / static_cast<float> (sampleRateHz));
+
+    const float lowTightenAmount = juce::jmap (lengthMacro, 0.02f, 0.22f);
+    const float dryLowAnchorAmount = juce::jmap (lengthMacro, 0.03f, 0.20f);
+    const float parallelDryAmount = juce::jmap (lengthMacro, 0.04f, 0.14f);
+
+    // Softness가 높으면 이미 부드러운 방향이므로 트랜지언트 보정은 조금 줄입니다.
+    const float transientAmount = juce::jmap (lengthMacro, 0.015f, 0.105f) * (1.0f - softness * 0.35f);
+
+    // 짧은 반복은 질감이 얇아질 수 있어서 아주 약한 tape-style 새츄레이션을 더합니다.
+    const float saturationDrive = juce::jmap (lengthMacro, 1.02f, 1.24f) + softness * 0.08f;
+    const float saturationNormaliser = 1.0f / std::tanh (saturationDrive);
+
+    // 짧은 반복에서 스테레오가 너무 넓으면 중심이 흔들릴 수 있습니다.
+    // 그래서 짧은 Length에서는 살짝 좁히고, 긴 Length에서는 약간 넓게 둡니다.
+    const float stereoWidth = juce::jmap (lengthMacro, 1.04f, 0.86f);
+
+    // 여러 보정을 거친 뒤 전체 레벨이 과해지지 않도록 아주 작은 보상 게인을 둡니다.
+    const float outputTrim = juce::jmap (lengthMacro, 0.99f, 0.94f);
+
     // DAW가 멈춰 있을 때는 반복 효과를 만들지 않고 입력을 그대로 통과시킵니다.
     // 하지만 Circular Buffer에는 계속 입력을 저장해둡니다.
     //
@@ -414,8 +493,16 @@ void BeatRepeaterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // 새 반복 구간을 시작할 때 LPF 상태를 반복 조각의 첫 sample 근처로 맞춥니다.
             // 이렇게 하면 필터가 갑자기 튀는 것을 줄일 수 있습니다.
             for (int ch = 0; ch < numChannels; ++ch)
+            {
                 lowpassState[static_cast<size_t> (ch)] =
                     circularBuffer.getSample (ch, repeatStartPosition);
+
+                wetLowControlState[static_cast<size_t> (ch)] =
+                    circularBuffer.getSample (ch, repeatStartPosition);
+
+                transientDetectorState[static_cast<size_t> (ch)] =
+                    circularBuffer.getSample (ch, repeatStartPosition);
+            }
         }
 
         const bool hasEnoughAudio = totalSamplesWritten >= repeatLengthSamples;
@@ -481,11 +568,116 @@ void BeatRepeaterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                 // Softness 0%   -> repeatedSample 위주
                 // Softness 100% -> filteredSample 위주
-                output = repeatedSample * (1.0f - softness)
-                       + filteredSample  * softness;
+                float masteredSample = repeatedSample * (1.0f - softness)
+                                     + filteredSample  * softness;
+
+                //==========================================================================
+                // Length Macro 1: 저역 디머드
+                //
+                // 짧은 반복에서는 킥/베이스의 저역이 아주 빠르게 반복되며
+                // "웅웅거림", "먹먹함", "뭉침"을 만들 수 있습니다.
+                //
+                // 마스터링에서는 이런 경우 저역을 무조건 크게 깎기보다,
+                // 반복음 쪽의 불필요한 저역만 조금 정리해서 중심을 단단하게 만듭니다.
+                //==========================================================================
+                float& wetLowMemory = wetLowControlState[static_cast<size_t> (ch)];
+                wetLowMemory += deMudCoeff * (masteredSample - wetLowMemory);
+
+                const float wetHighPassed = masteredSample - wetLowMemory;
+                masteredSample = masteredSample * (1.0f - lowTightenAmount)
+                               + wetHighPassed * lowTightenAmount;
+
+                //==========================================================================
+                // Length Macro 2: 트랜지언트 보정
+                //
+                // 반복 효과가 "심심하다"는 피드백은 어택이 앞으로 나오지 않는 경우가 많습니다.
+                // 여기서는 반복음의 빠른 변화분만 아주 조금 더해 펀치감을 보정합니다.
+                //==========================================================================
+                float& transientMemory = transientDetectorState[static_cast<size_t> (ch)];
+                transientMemory += transientCoeff * (masteredSample - transientMemory);
+
+                const float transient = masteredSample - transientMemory;
+                masteredSample += transient * transientAmount;
+
+                //==========================================================================
+                // Length Macro 3: 슬라이스 엔벨로프
+                //
+                // 반복 조각의 끝부분이 너무 길게 남으면 짧은 Length에서 리듬이 흐려집니다.
+                // 끝으로 갈수록 아주 미세하게 정리해 더 또렷한 그루브를 만듭니다.
+                //==========================================================================
+                const float phaseRatio = repeatLengthSamples > 1
+                    ? static_cast<float> (phase) / static_cast<float> (repeatLengthSamples - 1)
+                    : 0.0f;
+
+                const float tailShape = smoothStep (juce::jlimit (0.0f, 1.0f, (phaseRatio - 0.72f) / 0.28f));
+                const float tailTightening = tailShape * juce::jmap (lengthMacro, 0.015f, 0.13f);
+
+                const float attackShape = 1.0f - smoothStep (
+                    juce::jlimit (0.0f, 1.0f, static_cast<float> (phase) / static_cast<float> (juce::jmax (1, fadeSamples * 3))));
+
+                const float attackLift = attackShape * juce::jmap (lengthMacro, 0.005f, 0.045f);
+
+                masteredSample *= (1.0f - tailTightening + attackLift);
+
+                //==========================================================================
+                // Length Macro 4: 아주 약한 tape-style 새츄레이션
+                //
+                // tanh 곡선은 소리를 거칠게 자르는 대신 둥글게 눌러줍니다.
+                // 짧은 반복에서 얇고 디지털스럽게 느껴지는 부분을 조금 더 밀도 있게 만듭니다.
+                //==========================================================================
+                masteredSample = std::tanh (masteredSample * saturationDrive) * saturationNormaliser;
+
+                //==========================================================================
+                // Length Macro 5: 저역 앵커와 병렬 원본 블렌드
+                //
+                // 반복음이 100% wet이면 재미는 있지만 곡의 중심이 사라질 수 있습니다.
+                // 그래서 Length가 짧을수록 원본의 저역과 아주 적은 원본 신호를 섞어
+                // "효과는 강한데 곡은 무너지지 않는" 방향으로 보정합니다.
+                //==========================================================================
+                float& dryLowMemory = dryLowAnchorState[static_cast<size_t> (ch)];
+                dryLowMemory += dryLowCoeff * (input - dryLowMemory);
+
+                masteredSample = masteredSample * (1.0f - dryLowAnchorAmount)
+                               + dryLowMemory  * dryLowAnchorAmount;
+
+                output = masteredSample * (1.0f - parallelDryAmount)
+                       + input          * parallelDryAmount;
+
+                output *= outputTrim;
             }
 
             buffer.setSample (ch, sample, output);
+        }
+
+        //==========================================================================
+        // Length Macro 6: 스테레오 중심 정리
+        //
+        // 마스터링에서는 좌우 폭보다 "중심이 무너지지 않는지"가 중요합니다.
+        // 짧은 반복에서는 스테레오 폭을 살짝 좁혀 킥, 스네어, 보컬 중심이
+        // 덜 흔들리게 만듭니다.
+        //==========================================================================
+        if (hasEnoughAudio && numChannels >= 2)
+        {
+            const float left = buffer.getSample (0, sample);
+            const float right = buffer.getSample (1, sample);
+
+            const float mid = (left + right) * 0.5f;
+            const float side = (left - right) * 0.5f * stereoWidth;
+
+            buffer.setSample (0, sample, mid + side);
+            buffer.setSample (1, sample, mid - side);
+        }
+
+        //==========================================================================
+        // Length Macro 7: 마지막 소프트 리미터
+        //
+        // 여러 보정을 거친 뒤 예상치 못한 피크가 튀어도
+        // 출력이 과하게 깨지지 않도록 마지막에서 한 번 더 안전하게 정리합니다.
+        //==========================================================================
+        if (hasEnoughAudio)
+        {
+            for (int ch = 0; ch < numChannels; ++ch)
+                buffer.setSample (ch, sample, softLimitSample (buffer.getSample (ch, sample)));
         }
 
         writePosition = wrapBufferIndex (writePosition + 1);
@@ -569,6 +761,25 @@ bool BeatRepeaterAudioProcessor::isFiniteAndPositive (double value) noexcept
     return std::isfinite (value) && value > 0.0;
 }
 
+float BeatRepeaterAudioProcessor::smoothStep (float value) noexcept
+{
+    const float x = juce::jlimit (0.0f, 1.0f, value);
+    return x * x * (3.0f - 2.0f * x);
+}
+
+float BeatRepeaterAudioProcessor::softLimitSample (float sample) noexcept
+{
+    // ceiling은 최종 출력이 사실상 넘지 않게 두는 안전선입니다.
+    // tanh는 입력이 작을 때는 거의 그대로 두고,
+    // 입력이 커질수록 자연스럽게 눌러줍니다.
+    constexpr float ceiling = 0.98f;
+
+    if (! std::isfinite (sample))
+        return 0.0f;
+
+    return ceiling * std::tanh (sample / ceiling);
+}
+
 int BeatRepeaterAudioProcessor::wrapBufferIndex (int index) const noexcept
 {
     if (circularBufferSize <= 0)
@@ -595,4 +806,3 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new BeatRepeaterAudioProcessor();
 }
-

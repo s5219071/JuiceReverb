@@ -87,7 +87,7 @@ private:
     // APVTS에 등록할 파라미터 목록을 만듭니다.
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // Grid 콤보박스 인덱스를 PPQ 길이로 바꿉니다.
+    // Length 노브 인덱스를 PPQ 길이로 바꿉니다.
     //
     // PPQ는 "4분음표 기준 박자 위치"입니다.
     // 1.0 PPQ = 4분음표 1개입니다.
@@ -95,6 +95,18 @@ private:
 
     // BPM, sampleRate 같은 값이 정상적인 숫자인지 검사합니다.
     static bool isFiniteAndPositive (double value) noexcept;
+
+    // 0.0~1.0 사이 값을 부드러운 S자 곡선으로 바꿉니다.
+    //
+    // 일반 직선 변화보다 시작과 끝이 자연스러워서
+    // 클릭 방지, 어택 보정, 테일 정리 같은 곳에 사용합니다.
+    static float smoothStep (float value) noexcept;
+
+    // 마스터링 체인 마지막에서 쓰는 부드러운 피크 안전장치입니다.
+    //
+    // 벽돌처럼 딱 잘라내는 hard clipping이 아니라,
+    // 큰 피크만 둥글게 눌러서 거친 디지털 클립을 줄입니다.
+    static float softLimitSample (float sample) noexcept;
 
     // Circular Buffer 인덱스가 범위를 벗어났을 때 다시 정상 범위로 감싸줍니다.
     int wrapBufferIndex (int index) const noexcept;
@@ -168,6 +180,24 @@ private:
     std::vector<float> lowpassState;
 
     //==============================================================================
+    // Mastering Macro 상태값들
+    //
+    // 아래 상태값들은 사용자가 직접 만지는 별도 노브가 아닙니다.
+    // Length 노브가 짧아질수록 자동으로 더 적극적으로 동작하는
+    // "원 노브 마스터링 매크로"의 내부 기억 공간입니다.
+
+    // 반복음의 과한 저역을 살짝 정리하기 위한 저역 추적 상태입니다.
+    // 짧은 반복에서 킥/베이스가 겹쳐 뭉개지는 느낌을 줄이는 데 사용합니다.
+    std::vector<float> wetLowControlState;
+
+    // 원본 입력의 저역을 아주 조금 보존하기 위한 상태입니다.
+    // 반복 효과가 강해져도 곡의 중심 저역이 무너지지 않도록 도와줍니다.
+    std::vector<float> dryLowAnchorState;
+
+    // 반복음의 어택과 존재감을 보정하기 위한 트랜지언트 추적 상태입니다.
+    // 너무 죽은 반복음을 조금 더 앞으로 나오게 만드는 데 사용합니다.
+    std::vector<float> transientDetectorState;
+
+    //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BeatRepeaterAudioProcessor)
 };
-

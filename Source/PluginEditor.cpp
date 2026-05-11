@@ -119,50 +119,6 @@ void BeatRepeaterAudioProcessorEditor::NeonLookAndFeel::drawRotarySlider
                    innerRadius * 2.0f);
 }
 
-void BeatRepeaterAudioProcessorEditor::NeonLookAndFeel::drawComboBox
-(
-    juce::Graphics& g,
-    int width,
-    int height,
-    bool isButtonDown,
-    int buttonX,
-    int buttonY,
-    int buttonW,
-    int buttonH,
-    juce::ComboBox& box
-)
-{
-    juce::ignoreUnused (buttonX, buttonY, buttonW, buttonH, box);
-
-    const auto bounds = juce::Rectangle<float> (0.0f,
-                                                0.0f,
-                                                static_cast<float> (width),
-                                                static_cast<float> (height))
-                                                .reduced (1.0f);
-
-    // ComboBox 배경입니다.
-    g.setColour (isButtonDown ? juce::Colour::fromString ("ff242424") : darkPanelColour);
-    g.fillRoundedRectangle (bounds, 6.0f);
-
-    // 네온 블루 테두리입니다.
-    g.setColour (neonBlueColour);
-    g.drawRoundedRectangle (bounds, 6.0f, 1.6f);
-
-    // 오른쪽에 아래 방향 화살표를 직접 그립니다.
-    // 사용자가 여기를 누르면 메뉴가 열린다는 시각적 힌트입니다.
-    const float arrowSize = 7.0f;
-    const float arrowX = static_cast<float> (width) - 20.0f;
-    const float arrowY = static_cast<float> (height) * 0.5f - 2.0f;
-
-    juce::Path arrow;
-    arrow.addTriangle (arrowX - arrowSize * 0.5f, arrowY,
-                       arrowX + arrowSize * 0.5f, arrowY,
-                       arrowX, arrowY + arrowSize);
-
-    g.setColour (neonBlueColour);
-    g.fillPath (arrow);
-}
-
 //==============================================================================
 BeatRepeaterAudioProcessorEditor::BeatRepeaterAudioProcessorEditor
 (
@@ -175,19 +131,21 @@ BeatRepeaterAudioProcessorEditor::BeatRepeaterAudioProcessorEditor
     setSize (400, 300);
 
     //==========================================================================
-    // GRID 라벨 설정
+    // LENGTH 라벨 설정
     //==========================================================================
-    gridLabel.setText ("GRID", juce::dontSendNotification);
-    gridLabel.setJustificationType (juce::Justification::centred);
-    gridLabel.setColour (juce::Label::textColourId, neonBlueColour);
-    gridLabel.setFont (juce::Font (16.0f, juce::Font::bold));
-    addAndMakeVisible (gridLabel);
+    lengthLabel.setText ("LENGTH", juce::dontSendNotification);
+    lengthLabel.setJustificationType (juce::Justification::centred);
+    lengthLabel.setColour (juce::Label::textColourId, neonBlueColour);
+    lengthLabel.setFont (juce::Font (16.0f, juce::Font::bold));
+    addAndMakeVisible (lengthLabel);
 
     //==========================================================================
-    // GRID ComboBox 설정
+    // LENGTH Slider 설정
     //
-    // Processor의 grid 파라미터 선택지와 순서가 반드시 같아야 합니다.
-    // AudioParameterChoice:
+    // 내부 파라미터는 기존 "grid"입니다.
+    // 단, 화면에서는 ComboBox 대신 로터리 노브로 보여줍니다.
+    //
+    // 값 대응:
     // 0 = 1/1
     // 1 = 1/2
     // 2 = 1/4
@@ -195,21 +153,38 @@ BeatRepeaterAudioProcessorEditor::BeatRepeaterAudioProcessorEditor
     // 4 = 1/16
     // 5 = 1/32
     //
-    // ComboBox item ID는 1부터 시작합니다.
-    // 그래서 "1/1"의 item ID는 1, "1/32"의 item ID는 6입니다.
+    // Length가 짧아질수록 Processor 안에서 마스터링 매크로가 자동으로 더 많이 동작합니다.
     //==========================================================================
-    gridComboBox.addItem ("1/1",  1);
-    gridComboBox.addItem ("1/2",  2);
-    gridComboBox.addItem ("1/4",  3);
-    gridComboBox.addItem ("1/8",  4);
-    gridComboBox.addItem ("1/16", 5);
-    gridComboBox.addItem ("1/32", 6);
+    lengthSlider.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+    lengthSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 24);
+    lengthSlider.setLookAndFeel (&neonLookAndFeel);
+    lengthSlider.setColour (juce::Slider::textBoxTextColourId, neonBlueColour);
+    lengthSlider.setNumDecimalPlacesToDisplay (0);
+    lengthSlider.setRange (0.0, 5.0, 1.0);
+    lengthSlider.textFromValueFunction = [] (double value)
+    {
+        switch (juce::jlimit (0, 5, static_cast<int> (std::round (value))))
+        {
+            case 0:  return juce::String ("1/1");
+            case 1:  return juce::String ("1/2");
+            case 2:  return juce::String ("1/4");
+            case 3:  return juce::String ("1/8");
+            case 4:  return juce::String ("1/16");
+            default: return juce::String ("1/32");
+        }
+    };
 
-    gridComboBox.setJustificationType (juce::Justification::centred);
-    gridComboBox.setLookAndFeel (&neonLookAndFeel);
-    gridComboBox.setColour (juce::ComboBox::textColourId, neonBlueColour);
-    gridComboBox.setColour (juce::ComboBox::backgroundColourId, darkPanelColour);
-    addAndMakeVisible (gridComboBox);
+    lengthSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        if (text == "1/1")  return 0.0;
+        if (text == "1/2")  return 1.0;
+        if (text == "1/4")  return 2.0;
+        if (text == "1/8")  return 3.0;
+        if (text == "1/16") return 4.0;
+        return 5.0;
+    };
+
+    addAndMakeVisible (lengthSlider);
 
     //==========================================================================
     // SOFTNESS 라벨 설정
@@ -245,9 +220,9 @@ BeatRepeaterAudioProcessorEditor::BeatRepeaterAudioProcessorEditor
     // "grid"와 "softness"라는 문자열은 Processor에서 만든 파라미터 ID와
     // 정확히 일치해야 합니다.
     //==========================================================================
-    gridAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts,
+    lengthAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts,
                                                            "grid",
-                                                           gridComboBox);
+                                                           lengthSlider);
 
     softnessAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts,
                                                              "softness",
@@ -259,13 +234,13 @@ BeatRepeaterAudioProcessorEditor::~BeatRepeaterAudioProcessorEditor()
     // Attachment를 먼저 해제합니다.
     // UI 컴포넌트가 사라지기 전에 연결을 끊어야 안전합니다.
     softnessAttachment = nullptr;
-    gridAttachment = nullptr;
+    lengthAttachment = nullptr;
 
     // LookAndFeel 연결을 해제합니다.
     // JUCE에서는 커스텀 LookAndFeel 객체가 사라진 뒤에도 컴포넌트가
     // 그 객체를 바라보고 있으면 문제가 생길 수 있습니다.
     softnessSlider.setLookAndFeel (nullptr);
-    gridComboBox.setLookAndFeel (nullptr);
+    lengthSlider.setLookAndFeel (nullptr);
 }
 
 //==============================================================================
@@ -292,7 +267,7 @@ void BeatRepeaterAudioProcessorEditor::paint (juce::Graphics& g)
     // 하단의 작은 상태 텍스트입니다.
     g.setColour (softTextColour);
     g.setFont (juce::Font (12.0f));
-    g.drawText ("HOST SYNCED GRID REPEATER",
+    g.drawText ("HOST SYNCED MASTER REPEATER",
                 0,
                 getHeight() - 34,
                 getWidth(),
@@ -306,8 +281,8 @@ void BeatRepeaterAudioProcessorEditor::resized()
     // 전체 창 크기: 400 x 300
     //
     // 왼쪽 영역:
-    // - GRID 라벨
-    // - Grid ComboBox
+    // - LENGTH 라벨
+    // - Length 노브
     //
     // 오른쪽 영역:
     // - SOFTNESS 라벨
@@ -320,10 +295,9 @@ void BeatRepeaterAudioProcessorEditor::resized()
 
     const int columnWidth = 136;
 
-    gridLabel.setBounds (leftColumnX, topAreaY, columnWidth, labelHeight);
-    gridComboBox.setBounds (leftColumnX, topAreaY + 44, columnWidth, 40);
+    lengthLabel.setBounds (leftColumnX, topAreaY, columnWidth, labelHeight);
+    lengthSlider.setBounds (leftColumnX, topAreaY + 34, columnWidth, 142);
 
     softnessLabel.setBounds (rightColumnX, topAreaY, columnWidth, labelHeight);
     softnessSlider.setBounds (rightColumnX, topAreaY + 34, columnWidth, 142);
 }
-
