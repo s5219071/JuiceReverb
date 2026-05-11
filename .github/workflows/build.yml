@@ -170,6 +170,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -185,6 +188,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           WORKFLOW_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
@@ -195,10 +199,11 @@ jobs:
             tag="${WORKFLOW_RELEASE_TAG}"
           fi
 
-          if gh release view "${tag}" >/dev/null 2>&1; then
-            gh release upload "${tag}" dist/*.zip --clobber
+          if gh release view "${tag}" --repo "${GH_REPO}" >/dev/null 2>&1; then
+            gh release upload "${tag}" dist/*.zip --repo "${GH_REPO}" --clobber
           else
             gh release create "${tag}" dist/*.zip \
+              --repo "${GH_REPO}" \
               --target "${GITHUB_SHA}" \
               --title "BeatRepeater ${tag}" \
               --notes "Windows VST3 and macOS Universal VST3 builds for BeatRepeater."
