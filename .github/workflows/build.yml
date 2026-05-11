@@ -1,41 +1,52 @@
-name: Build Windows VST3
+name: Build and Release VST3
 
 # ==============================================================================
-# GitHub Actions 워크플로우
+# GitHub Actions workflow
 #
-# 이 파일은 GitHub 서버에게 다음 작업을 시킵니다.
+# 이 워크플로우는 Windows용 VST3와 macOS용 VST3를 모두 빌드합니다.
 #
-# 1. Windows 빌드 서버를 준비한다.
-# 2. 저장소 코드를 내려받는다.
-# 3. CMake로 JUCE 프로젝트를 설정한다.
-# 4. BeatRepeater VST3를 빌드한다.
-# 5. BeatRepeater.vst3를 Artifact로 업로드한다.
+# 결과물:
+# - BeatRepeater-Windows-VST3.zip
+# - BeatRepeater-macOS-Universal-VST3.zip
 #
-# Artifact는 빌드가 끝난 뒤 GitHub 웹페이지에서 다운로드할 수 있는 결과물입니다.
+# 동작 방식:
+# - main/master 브랜치에 push하면 Windows/macOS 빌드 Artifact를 만듭니다.
+# - v* 태그를 push하면 두 빌드를 만든 뒤 GitHub Release에 자동 배포합니다.
+# - Actions 화면에서 수동 실행할 때 publish_release를 true로 선택해도 Release를 만듭니다.
 # ==============================================================================
 
 on:
-  # GitHub 웹사이트에서 버튼으로 직접 빌드 시작할 수 있게 하는 설정입니다.
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Build and publish a GitHub Release"
+        required: true
+        default: false
+        type: boolean
+      release_tag:
+        description: "Release tag used when publish_release is true"
+        required: true
+        default: "v1.0.0"
+        type: string
 
-  # main 또는 master 브랜치에 코드를 올릴 때 자동 빌드합니다.
   push:
     branches:
       - main
       - master
+    tags:
+      - "v*"
 
-  # Pull Request를 만들 때도 빌드가 되는지 확인합니다.
   pull_request:
     branches:
       - main
       - master
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows-vst3:
-    name: Build BeatRepeater VST3 on Windows
+    name: Build Windows VST3
     runs-on: windows-latest
 
     steps:
@@ -58,37 +69,137 @@ jobs:
         run: |
           cmake --build build --config Release --target BeatRepeater_VST3 --parallel
 
-      - name: Collect VST3 artifact
+      - name: Package Windows VST3
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          # JUCE CMake 빌드는 보통 아래와 비슷한 위치에 VST3를 만듭니다.
-          # build/BeatRepeater_artefacts/Release/VST3/BeatRepeater.vst3
-          #
-          # 하지만 JUCE/CMake 버전에 따라 중간 폴더명이 조금 달라질 수 있으므로,
-          # build 폴더 전체에서 BeatRepeater.vst3 폴더를 직접 찾습니다.
           $vst3 = Get-ChildItem -Path "build" -Recurse -Directory -Filter "BeatRepeater.vst3" | Select-Object -First 1
 
           if ($null -eq $vst3) {
             Write-Host "Build folder contents:"
             Get-ChildItem -Path "build" -Recurse | Select-Object -ExpandProperty FullName
-            throw "BeatRepeater.vst3 was not found. The build may have failed or the output path changed."
+            throw "BeatRepeater.vst3 was not found."
           }
 
           New-Item -ItemType Directory -Force -Path "artifacts" | Out-Null
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+
           Copy-Item -LiteralPath $vst3.FullName -Destination "artifacts" -Recurse -Force
+          Compress-Archive -Path "artifacts/BeatRepeater.vst3" -DestinationPath "dist/BeatRepeater-Windows-VST3.zip" -Force
 
-          Write-Host "Collected VST3 from:"
-          Write-Host $vst3.FullName
+          Write-Host "Packaged Windows VST3:"
+          Get-ChildItem -Path "dist" | Select-Object -ExpandProperty FullName
 
-          Write-Host "Artifact contents:"
-          Get-ChildItem -Path "artifacts" -Recurse | Select-Object -ExpandProperty FullName
-
-      - name: Upload VST3 artifact
+      - name: Upload Windows VST3 artifact
         uses: actions/upload-artifact@v7
         with:
           name: BeatRepeater-Windows-VST3
-          path: artifacts/BeatRepeater.vst3
+          path: dist/BeatRepeater-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14
+
+  build-macos-vst3:
+    name: Build macOS Universal VST3
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Show build tools
+        shell: bash
+        run: |
+          cmake --version
+          git --version
+          xcodebuild -version
+
+      - name: Configure CMake
+        shell: bash
+        run: |
+          cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build VST3
+        shell: bash
+        run: |
+          cmake --build build --config Release --target BeatRepeater_VST3 --parallel
+
+      - name: Package macOS VST3
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          vst3="$(find build -type d -name 'BeatRepeater.vst3' -print -quit)"
+
+          if [[ -z "${vst3}" ]]; then
+            echo "Build folder contents:"
+            find build -maxdepth 6 -print
+            echo "BeatRepeater.vst3 was not found."
+            exit 1
+          fi
+
+          mkdir -p artifacts dist
+          cp -R "${vst3}" artifacts/
+
+          # Apple Developer ID 인증서가 없는 공개 CI 환경에서는 정식 notarization을 할 수 없습니다.
+          # 대신 ad-hoc codesign을 적용해 macOS 번들 구조가 가능한 한 정상적으로 인식되게 합니다.
+          codesign --force --deep --sign - "artifacts/BeatRepeater.vst3"
+          codesign --verify --deep --strict "artifacts/BeatRepeater.vst3"
+
+          # macOS 번들은 폴더처럼 보이는 패키지입니다.
+          # ditto는 macOS 번들의 메타데이터를 보존하면서 zip으로 묶는 데 적합합니다.
+          ditto -c -k --sequesterRsrc --keepParent "artifacts/BeatRepeater.vst3" "dist/BeatRepeater-macOS-Universal-VST3.zip"
+
+          echo "Packaged macOS VST3:"
+          ls -la dist
+
+      - name: Upload macOS VST3 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: BeatRepeater-macOS-Universal-VST3
+          path: dist/BeatRepeater-macOS-Universal-VST3.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows-vst3
+      - build-macos-vst3
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show release files
+        shell: bash
+        run: |
+          find dist -maxdepth 2 -type f -print
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${WORKFLOW_RELEASE_TAG}"
+          fi
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release upload "${tag}" dist/*.zip --clobber
+          else
+            gh release create "${tag}" dist/*.zip \
+              --target "${GITHUB_SHA}" \
+              --title "BeatRepeater ${tag}" \
+              --notes "Windows VST3 and macOS Universal VST3 builds for BeatRepeater."
+          fi

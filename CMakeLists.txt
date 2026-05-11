@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.22)
 # - GitHub 서버가 이 파일을 읽습니다.
 # - JUCE를 인터넷에서 내려받습니다.
 # - Source 폴더 안의 PluginProcessor / PluginEditor 코드를 컴파일합니다.
-# - 최종적으로 Windows용 BeatRepeater.vst3 파일을 만듭니다.
+# - 최종적으로 Windows/macOS용 BeatRepeater.vst3 파일을 만듭니다.
 # ==============================================================================
 
 project(BeatRepeater VERSION 1.0.0 LANGUAGES CXX)
@@ -64,7 +64,8 @@ juce_add_plugin(BeatRepeater
     # 개인 프로젝트라면 원하는 이름으로 바꿔도 됩니다.
     COMPANY_NAME "BeatRepeaterLab"
 
-    # Windows VST3만 빌드합니다.
+    # 현재 프로젝트는 VST3 포맷을 빌드합니다.
+    # Windows에서는 Windows VST3, macOS에서는 macOS VST3 번들이 만들어집니다.
     FORMATS VST3
 
     # 이 플러그인은 악기 신스가 아니라 입력 오디오를 바꾸는 이펙트입니다.
