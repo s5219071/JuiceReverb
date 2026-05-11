@@ -1,18 +1,15 @@
-name: Build and Release VST3
+name: Build JuiceReverb VST3
 
 # ==============================================================================
-# GitHub Actions workflow
+# GitHub Actions 빌드 워크플로우
 #
-# 이 워크플로우는 Windows용 VST3와 macOS용 VST3를 모두 빌드합니다.
+# 이 파일은 GitHub 서버에서 Windows VST3와 macOS Universal VST3를 자동 빌드합니다.
+# 사용자의 로컬 컴퓨터에 JUCE가 설치되어 있지 않아도 CMake가 JUCE를 내려받습니다.
 #
-# 결과물:
-# - BeatRepeater-Windows-VST3.zip
-# - BeatRepeater-macOS-Universal-VST3.zip
-#
-# 동작 방식:
-# - main/master 브랜치에 push하면 Windows/macOS 빌드 Artifact를 만듭니다.
-# - v* 태그를 push하면 두 빌드를 만든 뒤 GitHub Release에 자동 배포합니다.
-# - Actions 화면에서 수동 실행할 때 publish_release를 true로 선택해도 Release를 만듭니다.
+# 실행 방법:
+# - GitHub 저장소의 Actions 탭에서 "Build JuiceReverb VST3"를 수동 실행합니다.
+# - main/master 브랜치에 push하면 자동으로 빌드합니다.
+# - v1.0.0 같은 태그를 push하면 GitHub Release도 만들 수 있습니다.
 # ==============================================================================
 
 on:
@@ -51,13 +48,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Show build tools
         shell: pwsh
         run: |
           cmake --version
-          git --version
 
       - name: Configure CMake
         shell: pwsh
@@ -67,35 +63,32 @@ jobs:
       - name: Build VST3
         shell: pwsh
         run: |
-          cmake --build build --config Release --target BeatRepeater_VST3 --parallel
+          cmake --build build --config Release --target JuiceReverb_VST3 --parallel
 
       - name: Package Windows VST3
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $vst3 = Get-ChildItem -Path "build" -Recurse -Directory -Filter "BeatRepeater.vst3" | Select-Object -First 1
+          $vst3 = Get-ChildItem -Path "build" -Recurse -Directory -Filter "JuiceReverb.vst3" | Select-Object -First 1
 
           if ($null -eq $vst3) {
             Write-Host "Build folder contents:"
             Get-ChildItem -Path "build" -Recurse | Select-Object -ExpandProperty FullName
-            throw "BeatRepeater.vst3 was not found."
+            throw "JuiceReverb.vst3 was not found."
           }
 
           New-Item -ItemType Directory -Force -Path "artifacts" | Out-Null
           New-Item -ItemType Directory -Force -Path "dist" | Out-Null
 
           Copy-Item -LiteralPath $vst3.FullName -Destination "artifacts" -Recurse -Force
-          Compress-Archive -Path "artifacts/BeatRepeater.vst3" -DestinationPath "dist/BeatRepeater-Windows-VST3.zip" -Force
-
-          Write-Host "Packaged Windows VST3:"
-          Get-ChildItem -Path "dist" | Select-Object -ExpandProperty FullName
+          Compress-Archive -Path "artifacts/JuiceReverb.vst3" -DestinationPath "dist/JuiceReverb-Windows-VST3.zip" -Force
 
       - name: Upload Windows VST3 artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: BeatRepeater-Windows-VST3
-          path: dist/BeatRepeater-Windows-VST3.zip
+          name: JuiceReverb-Windows-VST3
+          path: dist/JuiceReverb-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -105,13 +98,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Show build tools
         shell: bash
         run: |
           cmake --version
-          git --version
           xcodebuild -version
 
       - name: Configure CMake
@@ -122,42 +114,37 @@ jobs:
       - name: Build VST3
         shell: bash
         run: |
-          cmake --build build --config Release --target BeatRepeater_VST3 --parallel
+          cmake --build build --config Release --target JuiceReverb_VST3 --parallel
 
       - name: Package macOS VST3
         shell: bash
         run: |
           set -euo pipefail
 
-          vst3="$(find build -type d -name 'BeatRepeater.vst3' -print -quit)"
+          vst3="$(find build -type d -name 'JuiceReverb.vst3' -print -quit)"
 
           if [[ -z "${vst3}" ]]; then
             echo "Build folder contents:"
             find build -maxdepth 6 -print
-            echo "BeatRepeater.vst3 was not found."
+            echo "JuiceReverb.vst3 was not found."
             exit 1
           fi
 
           mkdir -p artifacts dist
           cp -R "${vst3}" artifacts/
 
-          # Apple Developer ID 인증서가 없는 공개 CI 환경에서는 정식 notarization을 할 수 없습니다.
-          # 대신 ad-hoc codesign을 적용해 macOS 번들 구조가 가능한 한 정상적으로 인식되게 합니다.
-          codesign --force --deep --sign - "artifacts/BeatRepeater.vst3"
-          codesign --verify --deep --strict "artifacts/BeatRepeater.vst3"
+          # 공개 CI에는 Apple Developer ID 인증서가 없으므로 ad-hoc codesign만 적용합니다.
+          # 상업 배포 단계에서는 Apple notarization을 추가하는 것이 좋습니다.
+          codesign --force --deep --sign - "artifacts/JuiceReverb.vst3"
+          codesign --verify --deep --strict "artifacts/JuiceReverb.vst3"
 
-          # macOS 번들은 폴더처럼 보이는 패키지입니다.
-          # ditto는 macOS 번들의 메타데이터를 보존하면서 zip으로 묶는 데 적합합니다.
-          ditto -c -k --sequesterRsrc --keepParent "artifacts/BeatRepeater.vst3" "dist/BeatRepeater-macOS-Universal-VST3.zip"
-
-          echo "Packaged macOS VST3:"
-          ls -la dist
+          ditto -c -k --sequesterRsrc --keepParent "artifacts/JuiceReverb.vst3" "dist/JuiceReverb-macOS-Universal-VST3.zip"
 
       - name: Upload macOS VST3 artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: BeatRepeater-macOS-Universal-VST3
-          path: dist/BeatRepeater-macOS-Universal-VST3.zip
+          name: JuiceReverb-macOS-Universal-VST3
+          path: dist/JuiceReverb-macOS-Universal-VST3.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -171,10 +158,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
@@ -205,6 +192,6 @@ jobs:
             gh release create "${tag}" dist/*.zip \
               --repo "${GH_REPO}" \
               --target "${GITHUB_SHA}" \
-              --title "BeatRepeater ${tag}" \
-              --notes "Windows VST3 and macOS Universal VST3 builds for BeatRepeater."
+              --title "JuiceReverb ${tag}" \
+              --notes "Windows VST3 and macOS Universal VST3 builds for JuiceReverb."
           fi

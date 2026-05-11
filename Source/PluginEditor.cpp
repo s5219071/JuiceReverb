@@ -1,45 +1,30 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-//==============================================================================
-// 색상 상수입니다.
-//
-// 코드 곳곳에 색상 숫자를 직접 쓰면 나중에 수정하기 어렵습니다.
-// 이렇게 이름을 붙여두면 "네온 블루를 조금 바꾸고 싶다" 같은 상황에서
-// 한 곳만 수정하면 됩니다.
+#include <cmath>
+
 namespace
 {
-    const juce::Colour backgroundColour = juce::Colour::fromString ("ff121212");
-    const juce::Colour neonBlueColour   = juce::Colour::fromString ("ff00fbff");
-    const juce::Colour darkPanelColour  = juce::Colour::fromString ("ff1b1b1b");
-    const juce::Colour softTextColour   = juce::Colour::fromString ("cc00fbff");
+    const juce::Colour labBackground = juce::Colour::fromString ("ff050805");
+    const juce::Colour labPanel = juce::Colour::fromString ("ff0b120c");
+    const juce::Colour juiceGreen = juce::Colour::fromString ("ff00ff41");
+    const juce::Colour labText = juce::Colour::fromString ("ddc9ffd4");
+    const juce::Colour labMutedText = juce::Colour::fromString ("8896b89d");
+
+    constexpr float rotaryStartAngle = juce::MathConstants<float>::pi * 1.20f;
+    constexpr float rotaryEndAngle = juce::MathConstants<float>::pi * 2.80f;
 }
 
 //==============================================================================
-BeatRepeaterAudioProcessorEditor::NeonLookAndFeel::NeonLookAndFeel()
+JuiceReverbAudioProcessorEditor::MadLabLookAndFeel::MadLabLookAndFeel()
 {
-    // ComboBox 기본 색상 설정입니다.
-    setColour (juce::ComboBox::backgroundColourId, darkPanelColour);
-    setColour (juce::ComboBox::outlineColourId, neonBlueColour);
-    setColour (juce::ComboBox::textColourId, neonBlueColour);
-    setColour (juce::ComboBox::arrowColourId, neonBlueColour);
-
-    // ComboBox를 클릭했을 때 뜨는 메뉴의 색상입니다.
-    setColour (juce::PopupMenu::backgroundColourId, juce::Colour::fromString ("ff181818"));
-    setColour (juce::PopupMenu::textColourId, neonBlueColour);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, neonBlueColour);
-    setColour (juce::PopupMenu::highlightedTextColourId, juce::Colours::black);
-
-    // Slider 기본 색상 설정입니다.
-    setColour (juce::Slider::rotarySliderFillColourId, neonBlueColour);
-    setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colour::fromString ("ff303030"));
-    setColour (juce::Slider::thumbColourId, neonBlueColour);
-    setColour (juce::Slider::textBoxTextColourId, neonBlueColour);
+    setColour (juce::Slider::textBoxTextColourId, labText);
     setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    setColour (juce::Label::textColourId, labText);
 }
 
-void BeatRepeaterAudioProcessorEditor::NeonLookAndFeel::drawRotarySlider
+void JuiceReverbAudioProcessorEditor::MadLabLookAndFeel::drawRotarySlider
 (
     juce::Graphics& g,
     int x,
@@ -47,257 +32,350 @@ void BeatRepeaterAudioProcessorEditor::NeonLookAndFeel::drawRotarySlider
     int width,
     int height,
     float sliderPosProportional,
-    float rotaryStartAngle,
-    float rotaryEndAngle,
+    float rotaryStart,
+    float rotaryEnd,
     juce::Slider& slider
 )
 {
     juce::ignoreUnused (slider);
 
-    // 노브는 주어진 사각형 안에 들어가는 원으로 그립니다.
     const auto bounds = juce::Rectangle<float> (static_cast<float> (x),
                                                 static_cast<float> (y),
                                                 static_cast<float> (width),
                                                 static_cast<float> (height))
-                                                .reduced (8.0f);
+                                                .reduced (9.0f);
 
     const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const float centreX = bounds.getCentreX();
     const float centreY = bounds.getCentreY();
+    const float angle = rotaryStart + sliderPosProportional * (rotaryEnd - rotaryStart);
 
-    // 현재 슬라이더 값이 어느 각도인지 계산합니다.
-    const float angle = rotaryStartAngle
-                      + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
-
-    // 노브 바깥쪽 어두운 원입니다.
-    g.setColour (juce::Colour::fromString ("ff202020"));
+    // 금속 베이스입니다.
+    g.setColour (juce::Colour::fromString ("ff111812"));
     g.fillEllipse (bounds);
 
-    // 네온 느낌을 위한 얇은 외곽선입니다.
-    g.setColour (neonBlueColour.withAlpha (0.9f));
+    g.setColour (juce::Colour::fromString ("ff263027"));
     g.drawEllipse (bounds, 2.0f);
 
-    // 값이 차오른 구간을 arc로 그립니다.
+    g.setColour (juiceGreen.withAlpha (0.18f));
+    g.drawEllipse (bounds.reduced (5.0f), 1.0f);
+
+    // 계측기 눈금처럼 보이는 작은 틱 마크입니다.
+    for (int tick = 0; tick <= 10; ++tick)
+    {
+        const float proportion = static_cast<float> (tick) / 10.0f;
+        const float tickAngle = rotaryStart + proportion * (rotaryEnd - rotaryStart);
+        const float inner = radius - 11.0f;
+        const float outer = radius - 5.0f;
+
+        const juce::Point<float> p1 (centreX + std::cos (tickAngle) * inner,
+                                     centreY + std::sin (tickAngle) * inner);
+        const juce::Point<float> p2 (centreX + std::cos (tickAngle) * outer,
+                                     centreY + std::sin (tickAngle) * outer);
+
+        g.setColour (tick % 5 == 0 ? juiceGreen.withAlpha (0.58f)
+                                   : labMutedText.withAlpha (0.35f));
+        g.drawLine (juce::Line<float> (p1, p2), tick % 5 == 0 ? 1.4f : 1.0f);
+    }
+
+    // 현재 값 구간을 형광 액체가 차오르는 링처럼 그립니다.
     juce::Path valueArc;
     valueArc.addCentredArc (centreX,
                             centreY,
-                            radius - 7.0f,
-                            radius - 7.0f,
+                            radius - 15.0f,
+                            radius - 15.0f,
                             0.0f,
-                            rotaryStartAngle,
+                            rotaryStart,
                             angle,
                             true);
 
-    g.setColour (neonBlueColour);
-    g.strokePath (valueArc, juce::PathStrokeType (4.0f,
+    g.setColour (juiceGreen.withAlpha (0.22f));
+    g.strokePath (valueArc, juce::PathStrokeType (8.0f,
                                                   juce::PathStrokeType::curved,
                                                   juce::PathStrokeType::rounded));
 
-    // 노브 포인터입니다.
-    // 작은 선 하나가 현재 값을 가리킵니다.
-    juce::Path pointer;
-    const float pointerLength = radius * 0.58f;
-    const float pointerThickness = 3.0f;
+    g.setColour (juiceGreen);
+    g.strokePath (valueArc, juce::PathStrokeType (3.0f,
+                                                  juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
 
-    pointer.addRectangle (-pointerThickness * 0.5f,
-                          -radius + 10.0f,
-                          pointerThickness,
-                          pointerLength);
+    // 괴짜 실험실 장비 느낌의 포인터입니다.
+    juce::Path pointer;
+    pointer.addRoundedRectangle (-3.0f,
+                                 -radius + 20.0f,
+                                 6.0f,
+                                 radius * 0.62f,
+                                 3.0f);
 
     pointer.applyTransform (juce::AffineTransform::rotation (angle)
                             .translated (centreX, centreY));
 
-    g.setColour (neonBlueColour);
+    g.setColour (juiceGreen.withAlpha (0.92f));
     g.fillPath (pointer);
 
-    // 네온 블루가 너무 평면적으로 보이지 않도록 중심에 작은 어두운 원을 더합니다.
-    const float innerRadius = radius * 0.34f;
-    g.setColour (backgroundColour);
-    g.fillEllipse (centreX - innerRadius,
-                   centreY - innerRadius,
-                   innerRadius * 2.0f,
-                   innerRadius * 2.0f);
+    g.setColour (labBackground);
+    g.fillEllipse (centreX - radius * 0.31f,
+                   centreY - radius * 0.31f,
+                   radius * 0.62f,
+                   radius * 0.62f);
+
+    g.setColour (juiceGreen.withAlpha (0.70f));
+    g.drawEllipse (centreX - radius * 0.31f,
+                   centreY - radius * 0.31f,
+                   radius * 0.62f,
+                   radius * 0.62f,
+                   1.2f);
 }
 
 //==============================================================================
-BeatRepeaterAudioProcessorEditor::BeatRepeaterAudioProcessorEditor
-(
-    BeatRepeaterAudioProcessor& p
-)
-    : AudioProcessorEditor (&p),
-      audioProcessor (p)
+void JuiceReverbAudioProcessorEditor::JuiceTank::setState (float newLevel,
+                                                           float newDucking,
+                                                           float newPhase) noexcept
 {
-    // 플러그인 창 크기를 400x300으로 고정합니다.
-    setSize (400, 300);
-
-    //==========================================================================
-    // LENGTH 라벨 설정
-    //==========================================================================
-    lengthLabel.setText ("LENGTH", juce::dontSendNotification);
-    lengthLabel.setJustificationType (juce::Justification::centred);
-    lengthLabel.setColour (juce::Label::textColourId, neonBlueColour);
-    lengthLabel.setFont (juce::Font (16.0f, juce::Font::bold));
-    addAndMakeVisible (lengthLabel);
-
-    //==========================================================================
-    // LENGTH Slider 설정
-    //
-    // 내부 파라미터는 기존 "grid"입니다.
-    // 단, 화면에서는 ComboBox 대신 로터리 노브로 보여줍니다.
-    //
-    // 값 대응:
-    // 0 = 1/1
-    // 1 = 1/2
-    // 2 = 1/4
-    // 3 = 1/8
-    // 4 = 1/16
-    // 5 = 1/32
-    //
-    // Length가 짧아질수록 Processor 안에서 마스터링 매크로가 자동으로 더 많이 동작합니다.
-    //==========================================================================
-    lengthSlider.setSliderStyle (juce::Slider::RotaryVerticalDrag);
-    lengthSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 24);
-    lengthSlider.setLookAndFeel (&neonLookAndFeel);
-    lengthSlider.setColour (juce::Slider::textBoxTextColourId, neonBlueColour);
-    lengthSlider.setNumDecimalPlacesToDisplay (0);
-    lengthSlider.setRange (0.0, 5.0, 1.0);
-    lengthSlider.textFromValueFunction = [] (double value)
-    {
-        switch (juce::jlimit (0, 5, static_cast<int> (std::round (value))))
-        {
-            case 0:  return juce::String ("1/1");
-            case 1:  return juce::String ("1/2");
-            case 2:  return juce::String ("1/4");
-            case 3:  return juce::String ("1/8");
-            case 4:  return juce::String ("1/16");
-            default: return juce::String ("1/32");
-        }
-    };
-
-    lengthSlider.valueFromTextFunction = [] (const juce::String& text)
-    {
-        if (text == "1/1")  return 0.0;
-        if (text == "1/2")  return 1.0;
-        if (text == "1/4")  return 2.0;
-        if (text == "1/8")  return 3.0;
-        if (text == "1/16") return 4.0;
-        return 5.0;
-    };
-
-    addAndMakeVisible (lengthSlider);
-
-    //==========================================================================
-    // SOFTNESS 라벨 설정
-    //==========================================================================
-    softnessLabel.setText ("SOFTNESS", juce::dontSendNotification);
-    softnessLabel.setJustificationType (juce::Justification::centred);
-    softnessLabel.setColour (juce::Label::textColourId, neonBlueColour);
-    softnessLabel.setFont (juce::Font (16.0f, juce::Font::bold));
-    addAndMakeVisible (softnessLabel);
-
-    //==========================================================================
-    // SOFTNESS Slider 설정
-    //
-    // RotaryVerticalDrag:
-    // - 노브 형태로 보입니다.
-    // - 마우스를 위아래로 드래그해서 값을 바꿉니다.
-    //
-    // TextBoxBelow:
-    // - 노브 아래에 현재 값이 숫자로 보입니다.
-    //==========================================================================
-    softnessSlider.setSliderStyle (juce::Slider::RotaryVerticalDrag);
-    softnessSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 24);
-    softnessSlider.setTextValueSuffix (" %");
-    softnessSlider.setLookAndFeel (&neonLookAndFeel);
-    softnessSlider.setColour (juce::Slider::textBoxTextColourId, neonBlueColour);
-    addAndMakeVisible (softnessSlider);
-
-    //==========================================================================
-    // Attachment 연결
-    //
-    // 이것이 UI와 실제 오디오 엔진을 연결하는 핵심입니다.
-    //
-    // "grid"와 "softness"라는 문자열은 Processor에서 만든 파라미터 ID와
-    // 정확히 일치해야 합니다.
-    //==========================================================================
-    lengthAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts,
-                                                           "grid",
-                                                           lengthSlider);
-
-    softnessAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts,
-                                                             "softness",
-                                                             softnessSlider);
+    level = juce::jlimit (0.0f, 1.0f, newLevel);
+    ducking = juce::jlimit (0.0f, 1.0f, newDucking);
+    phase = newPhase;
+    repaint();
 }
 
-BeatRepeaterAudioProcessorEditor::~BeatRepeaterAudioProcessorEditor()
+void JuiceReverbAudioProcessorEditor::JuiceTank::paint (juce::Graphics& g)
 {
-    // Attachment를 먼저 해제합니다.
-    // UI 컴포넌트가 사라지기 전에 연결을 끊어야 안전합니다.
-    softnessAttachment = nullptr;
-    lengthAttachment = nullptr;
+    const auto bounds = getLocalBounds().toFloat().reduced (2.0f);
 
-    // LookAndFeel 연결을 해제합니다.
-    // JUCE에서는 커스텀 LookAndFeel 객체가 사라진 뒤에도 컴포넌트가
-    // 그 객체를 바라보고 있으면 문제가 생길 수 있습니다.
-    softnessSlider.setLookAndFeel (nullptr);
-    lengthSlider.setLookAndFeel (nullptr);
+    g.setColour (labPanel);
+    g.fillRoundedRectangle (bounds, 8.0f);
+
+    g.setColour (juiceGreen.withAlpha (0.20f));
+    g.drawRoundedRectangle (bounds, 8.0f, 1.2f);
+
+    auto glass = bounds.reduced (24.0f, 18.0f);
+    const float liquidHeight = glass.getHeight() * (0.22f + level * 0.70f);
+    const float liquidTop = glass.getBottom() - liquidHeight;
+
+    g.setColour (juce::Colour::fromString ("3318ff58"));
+    g.fillRoundedRectangle (glass, 8.0f);
+
+    // 액체 표면 파동입니다.
+    juce::Path liquidPath;
+    const float amplitude = 4.0f + level * 18.0f;
+    const int steps = 48;
+
+    liquidPath.startNewSubPath (glass.getX(), glass.getBottom());
+    liquidPath.lineTo (glass.getX(), liquidTop);
+
+    for (int i = 0; i <= steps; ++i)
+    {
+        const float x = glass.getX() + glass.getWidth() * static_cast<float> (i) / static_cast<float> (steps);
+        const float waveA = std::sin (phase + static_cast<float> (i) * 0.38f) * amplitude;
+        const float waveB = std::sin (phase * 0.63f + static_cast<float> (i) * 0.91f) * amplitude * 0.35f;
+        const float y = liquidTop + waveA + waveB;
+        liquidPath.lineTo (x, y);
+    }
+
+    liquidPath.lineTo (glass.getRight(), glass.getBottom());
+    liquidPath.closeSubPath();
+
+    g.setColour (juiceGreen.withAlpha (0.82f));
+    g.fillPath (liquidPath);
+
+    g.setColour (juiceGreen.withAlpha (0.28f));
+    g.drawHorizontalLine (static_cast<int> (liquidTop),
+                          glass.getX(),
+                          glass.getRight());
+
+    // Ducking이 강하게 걸릴수록 위쪽 압력 게이지가 더 어둡게 잠깁니다.
+    const auto pressure = glass.removeFromTop (14.0f).reduced (6.0f, 3.0f);
+    g.setColour (juiceGreen.withAlpha (0.18f));
+    g.fillRoundedRectangle (pressure, 4.0f);
+
+    g.setColour (juiceGreen.withAlpha (0.75f));
+    g.fillRoundedRectangle (pressure.withWidth (pressure.getWidth() * (1.0f - ducking)), 4.0f);
+
+    g.setColour (juiceGreen.withAlpha (0.82f));
+    g.drawRoundedRectangle (bounds.reduced (20.0f, 14.0f), 8.0f, 2.0f);
+
+    // 유리 하이라이트입니다.
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawLine (bounds.getX() + 34.0f,
+                bounds.getY() + 28.0f,
+                bounds.getX() + 62.0f,
+                bounds.getBottom() - 30.0f,
+                2.0f);
 }
 
 //==============================================================================
-void BeatRepeaterAudioProcessorEditor::paint (juce::Graphics& g)
+JuiceReverbAudioProcessorEditor::JuiceReverbAudioProcessorEditor (JuiceReverbAudioProcessor& processor)
+    : AudioProcessorEditor (&processor),
+      audioProcessor (processor)
 {
-    // 전체 배경을 아주 어두운 차콜색으로 채웁니다.
-    g.fillAll (backgroundColour);
+    setLookAndFeel (&madLabLookAndFeel);
+    setResizable (true, true);
+    setResizeLimits (680, 500, 1040, 760);
+    setSize (820, 540);
 
-    // 플러그인 이름을 위쪽 중앙에 표시합니다.
-    g.setColour (neonBlueColour);
-    g.setFont (juce::Font (22.0f, juce::Font::bold));
-    g.drawText ("BEAT REPEATER",
-                0,
-                18,
-                getWidth(),
-                32,
-                juce::Justification::centred,
-                false);
+    addAndMakeVisible (juiceTank);
 
-    // 얇은 네온 라인을 추가해 전체 UI에 중심선을 만들어줍니다.
-    g.setColour (neonBlueColour.withAlpha (0.35f));
-    g.drawLine (40.0f, 62.0f, static_cast<float> (getWidth() - 40), 62.0f, 1.0f);
+    setupKnob (mixSlider, mixLabel, "MIX", " %");
+    setupKnob (decaySlider, decayLabel, "DECAY", " s");
+    setupKnob (sizeSlider, sizeLabel, "SIZE", " %");
+    setupKnob (preDelaySlider, preDelayLabel, "PRE", " ms");
+    setupKnob (lowCutSlider, lowCutLabel, "LOW CUT", " Hz");
+    setupKnob (duckingSlider, duckingLabel, "DUCK", " %");
+    setupKnob (saturationSlider, saturationLabel, "JUICE", " %");
+    setupKnob (widthSlider, widthLabel, "WIDTH", " %");
+    setupKnob (dampingSlider, dampingLabel, "DAMP", " %");
 
-    // 하단의 작은 상태 텍스트입니다.
-    g.setColour (softTextColour);
-    g.setFont (juce::Font (12.0f));
-    g.drawText ("HOST SYNCED MASTER REPEATER",
-                0,
-                getHeight() - 34,
-                getWidth(),
-                20,
-                juce::Justification::centred,
-                false);
+    mixAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "mix", mixSlider);
+    decayAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "decay", decaySlider);
+    sizeAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "size", sizeSlider);
+    preDelayAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "preDelay", preDelaySlider);
+    lowCutAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "lowCut", lowCutSlider);
+    duckingAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "ducking", duckingSlider);
+    saturationAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "saturation", saturationSlider);
+    widthAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "width", widthSlider);
+    dampingAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "damping", dampingSlider);
+
+    startTimerHz (30);
 }
 
-void BeatRepeaterAudioProcessorEditor::resized()
+JuiceReverbAudioProcessorEditor::~JuiceReverbAudioProcessorEditor()
 {
-    // 전체 창 크기: 400 x 300
-    //
-    // 왼쪽 영역:
-    // - LENGTH 라벨
-    // - Length 노브
-    //
-    // 오른쪽 영역:
-    // - SOFTNESS 라벨
-    // - Softness 노브
-    const int topAreaY = 78;
-    const int labelHeight = 24;
+    stopTimer();
 
-    const int leftColumnX = 42;
-    const int rightColumnX = 222;
+    dampingAttachment = nullptr;
+    widthAttachment = nullptr;
+    saturationAttachment = nullptr;
+    duckingAttachment = nullptr;
+    lowCutAttachment = nullptr;
+    preDelayAttachment = nullptr;
+    sizeAttachment = nullptr;
+    decayAttachment = nullptr;
+    mixAttachment = nullptr;
 
-    const int columnWidth = 136;
+    setLookAndFeel (nullptr);
+}
 
-    lengthLabel.setBounds (leftColumnX, topAreaY, columnWidth, labelHeight);
-    lengthSlider.setBounds (leftColumnX, topAreaY + 34, columnWidth, 142);
+//==============================================================================
+void JuiceReverbAudioProcessorEditor::setupKnob (juce::Slider& slider,
+                                                 juce::Label& label,
+                                                 const juce::String& labelText,
+                                                 const juce::String& suffix)
+{
+    label.setText (labelText, juce::dontSendNotification);
+    label.setJustificationType (juce::Justification::centred);
+    label.setColour (juce::Label::textColourId, labText);
+    label.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+    addAndMakeVisible (label);
 
-    softnessLabel.setBounds (rightColumnX, topAreaY, columnWidth, labelHeight);
-    softnessSlider.setBounds (rightColumnX, topAreaY + 34, columnWidth, 142);
+    slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    slider.setRotaryParameters (rotaryStartAngle, rotaryEndAngle, true);
+    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 78, 22);
+    slider.setTextValueSuffix (suffix);
+    slider.setColour (juce::Slider::textBoxTextColourId, labText);
+    addAndMakeVisible (slider);
+}
+
+void JuiceReverbAudioProcessorEditor::layoutKnob (juce::Slider& slider,
+                                                  juce::Label& label,
+                                                  juce::Rectangle<int> bounds)
+{
+    label.setBounds (bounds.removeFromTop (22));
+    slider.setBounds (bounds);
+}
+
+void JuiceReverbAudioProcessorEditor::timerCallback()
+{
+    const float targetLevel = audioProcessor.getVisualLevel();
+    tankLevel = targetLevel > tankLevel
+        ? targetLevel
+        : tankLevel * 0.90f + targetLevel * 0.10f;
+
+    tankPhase += 0.12f + tankLevel * 0.18f;
+
+    if (tankPhase > juce::MathConstants<float>::twoPi)
+        tankPhase -= juce::MathConstants<float>::twoPi;
+
+    juiceTank.setState (tankLevel, audioProcessor.getDuckingDepth(), tankPhase);
+}
+
+//==============================================================================
+void JuiceReverbAudioProcessorEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (labBackground);
+
+    // 배경의 얇은 실험실 그리드입니다.
+    g.setColour (juiceGreen.withAlpha (0.055f));
+
+    for (int x = 0; x < getWidth(); x += 24)
+        g.drawVerticalLine (x, 0.0f, static_cast<float> (getHeight()));
+
+    for (int y = 0; y < getHeight(); y += 24)
+        g.drawHorizontalLine (y, 0.0f, static_cast<float> (getWidth()));
+
+    auto titleArea = getLocalBounds().removeFromTop (58);
+
+    g.setColour (juiceGreen);
+    g.setFont (juce::Font (juce::FontOptions (25.0f, juce::Font::bold)));
+    g.drawText ("JuiceReverb", titleArea.removeFromTop (34), juce::Justification::centred);
+
+    g.setColour (labMutedText);
+    g.setFont (juce::Font (juce::FontOptions (12.0f)));
+    g.drawText ("TRANCE LUSHNESS  |  INTERNAL DUCKING  |  MAD LAB DSP",
+                titleArea,
+                juce::Justification::centred);
+
+    g.setColour (juiceGreen.withAlpha (0.25f));
+    g.drawLine (34.0f, 62.0f, static_cast<float> (getWidth() - 34), 62.0f, 1.0f);
+}
+
+void JuiceReverbAudioProcessorEditor::resized()
+{
+    auto area = getLocalBounds().reduced (24);
+    area.removeFromTop (54);
+
+    const int knobWidth = 132;
+    const int knobHeight = 136;
+    const int gap = 14;
+
+    auto body = area.removeFromTop (300);
+
+    const int leftX = body.getX();
+    const int rightX = body.getRight() - knobWidth;
+    const int firstY = body.getY() + 6;
+    const int secondY = firstY + knobHeight + gap;
+
+    layoutKnob (mixSlider, mixLabel, { leftX, firstY, knobWidth, knobHeight });
+    layoutKnob (decaySlider, decayLabel, { leftX, secondY, knobWidth, knobHeight });
+
+    layoutKnob (duckingSlider, duckingLabel, { rightX, firstY, knobWidth, knobHeight });
+    layoutKnob (saturationSlider, saturationLabel, { rightX, secondY, knobWidth, knobHeight });
+
+    const int tankWidth = juce::jlimit (280, 390, body.getWidth() - knobWidth * 2 - 64);
+    const int tankHeight = 258;
+
+    juiceTank.setBounds (body.getCentreX() - tankWidth / 2,
+                         body.getY() + 18,
+                         tankWidth,
+                         tankHeight);
+
+    auto bottom = area.reduced (8, 0);
+    const int bottomKnobWidth = juce::jlimit (104, 132, (bottom.getWidth() - gap * 4) / 5);
+    const int bottomY = bottom.getY() + 14;
+
+    juce::Array<juce::Rectangle<int>> bottomSlots;
+
+    const int totalBottomWidth = bottomKnobWidth * 5 + gap * 4;
+    int x = bottom.getCentreX() - totalBottomWidth / 2;
+
+    for (int index = 0; index < 5; ++index)
+    {
+        bottomSlots.add ({ x, bottomY, bottomKnobWidth, knobHeight });
+        x += bottomKnobWidth + gap;
+    }
+
+    layoutKnob (sizeSlider, sizeLabel, bottomSlots[0]);
+    layoutKnob (preDelaySlider, preDelayLabel, bottomSlots[1]);
+    layoutKnob (lowCutSlider, lowCutLabel, bottomSlots[2]);
+    layoutKnob (widthSlider, widthLabel, bottomSlots[3]);
+    layoutKnob (dampingSlider, dampingLabel, bottomSlots[4]);
 }

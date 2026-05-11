@@ -4,46 +4,31 @@
 #include "PluginProcessor.h"
 
 //==============================================================================
-// BeatRepeaterAudioProcessorEditor
+// JuiceReverbAudioProcessorEditor
 //
-// 이 클래스는 플러그인의 "화면"을 담당합니다.
-//
-// 쉽게 말하면:
-// - 사용자가 보는 배경색
-// - LENGTH 노브
-// - SOFTNESS 노브
-// - 글자 색상
-// - 노브와 실제 소리 파라미터의 연결
-//
-// 이런 UI 관련 작업은 모두 여기에서 처리합니다.
+// 이 클래스는 플러그인의 화면입니다.
+// 소리는 Processor에서 만들고, Editor는 노브/라벨/시각화만 담당합니다.
 //==============================================================================
-class BeatRepeaterAudioProcessorEditor  : public juce::AudioProcessorEditor
+class JuiceReverbAudioProcessorEditor final : public juce::AudioProcessorEditor,
+                                              private juce::Timer
 {
 public:
-    explicit BeatRepeaterAudioProcessorEditor (BeatRepeaterAudioProcessor&);
-    ~BeatRepeaterAudioProcessorEditor() override;
+    explicit JuiceReverbAudioProcessorEditor (JuiceReverbAudioProcessor&);
+    ~JuiceReverbAudioProcessorEditor() override;
 
-    // 화면을 그리는 함수입니다.
-    void paint (juce::Graphics&) override;
-
-    // 창 크기가 바뀌거나 처음 만들어질 때,
-    // 각 UI 요소의 위치와 크기를 정하는 함수입니다.
+    void paint (juce::Graphics& g) override;
     void resized() override;
 
 private:
     //==============================================================================
-    // 커스텀 LookAndFeel
+    // Mad Lab 테마용 LookAndFeel입니다.
     //
-    // JUCE의 ComboBox와 Slider는 기본 모양이 정해져 있습니다.
-    // 우리가 원하는 다크 테마와 네온 블루 스타일을 만들기 위해
-    // LookAndFeel 클래스를 직접 만들어 색과 모양을 일부 바꿉니다.
-    //==============================================================================
-    class NeonLookAndFeel : public juce::LookAndFeel_V4
+    // JUCE 기본 노브 대신 어두운 금속 베젤, 형광 초록 아크, 계측기 포인터를 그립니다.
+    class MadLabLookAndFeel final : public juce::LookAndFeel_V4
     {
     public:
-        NeonLookAndFeel();
+        MadLabLookAndFeel();
 
-        // 로터리 슬라이더, 즉 노브를 그리는 함수입니다.
         void drawRotarySlider (juce::Graphics& g,
                                int x,
                                int y,
@@ -53,39 +38,74 @@ private:
                                float rotaryStartAngle,
                                float rotaryEndAngle,
                                juce::Slider& slider) override;
-
     };
 
     //==============================================================================
-    BeatRepeaterAudioProcessor& audioProcessor;
-
-    NeonLookAndFeel neonLookAndFeel;
-
-    // LENGTH 라벨과 로터리 슬라이더입니다.
+    // 중앙 Juice Tank 시각화입니다.
     //
-    // 내부 파라미터 ID는 예전 프로젝트 호환성을 위해 "grid"를 유지하지만,
-    // 사용자가 보는 UI에서는 Length 노브로 보여줍니다.
-    juce::Label lengthLabel;
-    juce::Slider lengthSlider;
+    // Processor가 제공하는 리버브 레벨과 ducking 값을 받아 초록 액체 높이와
+    // 표면 파동을 그립니다. 실제 오디오를 분석하지는 않고, 안전한 atomic 미터만 읽습니다.
+    class JuiceTank final : public juce::Component
+    {
+    public:
+        void setState (float newLevel, float newDucking, float newPhase) noexcept;
+        void paint (juce::Graphics& g) override;
 
-    // SOFTNESS 라벨과 로터리 슬라이더입니다.
-    juce::Label softnessLabel;
-    juce::Slider softnessSlider;
+    private:
+        float level = 0.0f;
+        float ducking = 0.0f;
+        float phase = 0.0f;
+    };
+
+    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+
+    void timerCallback() override;
+    void setupKnob (juce::Slider& slider,
+                    juce::Label& label,
+                    const juce::String& labelText,
+                    const juce::String& suffix);
+
+    void layoutKnob (juce::Slider& slider,
+                     juce::Label& label,
+                     juce::Rectangle<int> bounds);
 
     //==============================================================================
-    // Attachment는 UI와 Processor의 파라미터를 연결하는 케이블입니다.
-    //
-    // 예:
-    // - 사용자가 Softness 노브를 돌림
-    // - SliderAttachment가 그 값을 Processor의 "softness" 파라미터에 전달
-    // - processBlock에서 바뀐 softness 값을 읽음
-    // - 실제 소리가 바뀜
-    //
-    // 이 Attachment가 없으면 UI는 움직여도 실제 소리는 바뀌지 않습니다.
-    using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
+    JuiceReverbAudioProcessor& audioProcessor;
+    MadLabLookAndFeel madLabLookAndFeel;
+    JuiceTank juiceTank;
 
-    std::unique_ptr<SliderAttachment> lengthAttachment;
-    std::unique_ptr<SliderAttachment> softnessAttachment;
+    juce::Slider mixSlider;
+    juce::Slider decaySlider;
+    juce::Slider sizeSlider;
+    juce::Slider preDelaySlider;
+    juce::Slider lowCutSlider;
+    juce::Slider duckingSlider;
+    juce::Slider saturationSlider;
+    juce::Slider widthSlider;
+    juce::Slider dampingSlider;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BeatRepeaterAudioProcessorEditor)
+    juce::Label mixLabel;
+    juce::Label decayLabel;
+    juce::Label sizeLabel;
+    juce::Label preDelayLabel;
+    juce::Label lowCutLabel;
+    juce::Label duckingLabel;
+    juce::Label saturationLabel;
+    juce::Label widthLabel;
+    juce::Label dampingLabel;
+
+    std::unique_ptr<SliderAttachment> mixAttachment;
+    std::unique_ptr<SliderAttachment> decayAttachment;
+    std::unique_ptr<SliderAttachment> sizeAttachment;
+    std::unique_ptr<SliderAttachment> preDelayAttachment;
+    std::unique_ptr<SliderAttachment> lowCutAttachment;
+    std::unique_ptr<SliderAttachment> duckingAttachment;
+    std::unique_ptr<SliderAttachment> saturationAttachment;
+    std::unique_ptr<SliderAttachment> widthAttachment;
+    std::unique_ptr<SliderAttachment> dampingAttachment;
+
+    float tankLevel = 0.0f;
+    float tankPhase = 0.0f;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuiceReverbAudioProcessorEditor)
 };

@@ -1,23 +1,25 @@
-# BeatRepeater
+# JuiceReverb
 
-BeatRepeater is a JUCE-based Windows/macOS VST3 audio effect plugin.
+JuiceReverb는 JUCE/C++ 기반의 현대적인 VST3 리버브 플러그인입니다.
 
-Core features:
+핵심 목표는 트랜스 음악에 어울리는 넓고 투명한 리버브 꼬리, 원음 펀치를 지키는 Internal Ducking, 따뜻한 Juice Saturation, wet 전용 mastering-grade low-cut, Mid-Side width 컨트롤입니다.
 
-- Host BPM and PPQ synced beat repeat
-- Length macro selection from 1/1 to 1/32
-- Circular buffer based audio capture and repeat playback
-- Softness/Warmth control using short crossfade and low-pass filtering
-- One-knob mastering macro driven by Length:
-  low-end anchoring, de-mud filtering, transient lift, tape-style saturation,
-  stereo focus, and soft limiting
-- Dark neon blue plugin editor UI
-- GitHub Actions workflow for Windows and macOS VST3 cloud builds
+## 주요 기능
 
-## Repository Layout
+- APVTS 기반 파라미터 관리와 UI 자동 연결
+- 프리딜레이가 있는 스테레오 리버브 탱크
+- 입력이 강할 때 wet만 내려주는 Internal Ducking
+- 리버브 꼬리에 배음을 더하는 Juice Saturation
+- wet 전용 12dB/oct Low Cut
+- wet 전용 Mid-Side Width
+- 아주 어두운 실험실 배경과 형광 초록 Juice Tank UI
+- CMake FetchContent로 JUCE 자동 다운로드
+- GitHub Actions Windows/macOS VST3 클라우드 빌드
+
+## 파일 구조
 
 ```text
-BeatRepeater/
+JuiceReverb/
 ├─ CMakeLists.txt
 ├─ Source/
 │  ├─ PluginProcessor.h
@@ -29,25 +31,25 @@ BeatRepeater/
       └─ build.yml
 ```
 
-## Cloud Build and Release
+## 로컬 빌드
 
-Open the repository on GitHub, go to `Actions`, choose `Build and Release VST3`,
-then press `Run workflow`.
+```bash
+cmake -S . -B build
+cmake --build build --config Release --target JuiceReverb_VST3
+```
 
-The workflow now builds:
+## GitHub Actions 빌드
 
-- `BeatRepeater-Windows-VST3.zip`
-- `BeatRepeater-macOS-Universal-VST3.zip`
+GitHub 저장소에서 `Actions` 탭으로 이동한 뒤 `Build JuiceReverb VST3` 워크플로우를 실행하면 다음 산출물이 만들어집니다.
 
-To publish both builds as a GitHub Release, push a version tag such as:
+- `JuiceReverb-Windows-VST3.zip`
+- `JuiceReverb-macOS-Universal-VST3.zip`
+
+태그로 릴리스를 만들고 싶다면:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-macOS note:
-
-The macOS VST3 build is ad-hoc signed in GitHub Actions. For commercial public
-distribution without Gatekeeper warnings, an Apple Developer ID certificate and
-notarization step should be added later.
+macOS 공개 배포에는 Apple Developer ID 인증서와 notarization이 추가로 필요합니다.

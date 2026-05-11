@@ -1,203 +1,212 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <vector>
 
 //==============================================================================
-// BeatRepeaterAudioProcessor
+// JuiceReverbAudioProcessor
 //
-// 이 클래스는 플러그인의 "두뇌이자 엔진"입니다.
+// 이 클래스는 플러그인의 "오디오 엔진"입니다.
+// DAW가 보내는 오디오 블록을 받아서 리버브를 만들고, 다시 DAW로 돌려보냅니다.
 //
-// 쉽게 말하면:
-// - DAW에서 오디오를 받아오고
-// - 일정 길이만큼 오디오를 기억해두고
-// - DAW 박자에 맞춰 그 조각을 반복 재생하고
-// - Softness 값에 따라 클릭 노이즈를 줄이고 따뜻한 질감을 만듭니다.
-//
-// UI, 즉 버튼/노브/콤보박스는 PluginEditor에서 만들지만,
-// 실제 소리 처리는 전부 이 Processor에서 일어납니다.
+// 설계 철학:
+// - Dry 경로는 최대한 보존해서 원음의 펀치가 무너지지 않게 합니다.
+// - Wet 경로에만 리버브, 로우컷, 새추레이션, 스테레오 확장을 적용합니다.
+// - 입력 신호가 강할 때 wet만 자동으로 내려주는 Internal Ducking을 넣습니다.
+// - 모든 노브 값은 AudioProcessorValueTreeState(APVTS)로 관리합니다.
 //==============================================================================
-class BeatRepeaterAudioProcessor  : public juce::AudioProcessor
+class JuiceReverbAudioProcessor final : public juce::AudioProcessor
 {
 public:
-    //==============================================================================
-    BeatRepeaterAudioProcessor();
-    ~BeatRepeaterAudioProcessor() override;
+    JuiceReverbAudioProcessor();
+    ~JuiceReverbAudioProcessor() override;
 
-    //==============================================================================
-    // DAW가 플러그인에게 "이제 오디오 처리를 시작할 준비를 해라"라고 알려줄 때 호출됩니다.
+    // DAW가 재생을 시작하거나 샘플레이트가 바뀔 때 호출됩니다.
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
 
-    // DAW가 플러그인을 멈추거나 리소스를 정리할 때 호출됩니다.
+    // DAW가 플러그인 리소스를 정리할 때 호출됩니다.
     void releaseResources() override;
 
    #ifndef JucePlugin_PreferredChannelConfigurations
-    // 플러그인이 어떤 채널 구성을 지원하는지 검사합니다.
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
    #endif
 
-    //==============================================================================
-    // 실제 오디오가 처리되는 가장 중요한 함수입니다.
-    //
-    // DAW는 오디오를 아주 작은 덩어리(block) 단위로 계속 보내줍니다.
-    // processBlock은 그 덩어리를 받아서 가공한 뒤 다시 DAW로 돌려보냅니다.
-    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    // 실제 오디오 처리가 일어나는 가장 중요한 함수입니다.
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
 
-    //==============================================================================
-    // UI Editor 생성 관련 함수입니다.
+    // 플러그인 UI 생성 관련 함수입니다.
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override;
 
-    //==============================================================================
-    // 플러그인의 기본 정보입니다.
     const juce::String getName() const override;
-
     bool acceptsMidi() const override;
     bool producesMidi() const override;
     bool isMidiEffect() const override;
     double getTailLengthSeconds() const override;
 
-    //==============================================================================
-    // 기본 프리셋 관련 함수입니다.
-    //
-    // 이 예제에서는 별도의 프리셋 프로그램을 만들지 않고,
-    // APVTS(AudioProcessorValueTreeState)가 파라미터 저장을 담당합니다.
     int getNumPrograms() override;
     int getCurrentProgram() override;
     void setCurrentProgram (int index) override;
     const juce::String getProgramName (int index) override;
     void changeProgramName (int index, const juce::String& newName) override;
 
-    //==============================================================================
-    // DAW 프로젝트 저장/불러오기 때 파라미터 값을 저장하고 복원합니다.
+    // DAW 프로젝트 저장/불러오기 때 APVTS 상태를 저장하고 복원합니다.
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    //==============================================================================
-    // APVTS는 플러그인의 파라미터 관리자입니다.
-    //
-    // Grid, Softness 같은 값을 한 곳에서 관리합니다.
-    // 나중에 PluginEditor에서 ComboBox, Slider를 연결할 때도 이 apvts를 사용합니다.
-    //
-    // public으로 둔 이유:
-    // PluginEditor에서 audioProcessor.apvts 형태로 접근해 UI와 연결하기 쉽도록 하기 위해서입니다.
+    // UI가 슬라이더와 파라미터를 연결할 수 있도록 public으로 둡니다.
     juce::AudioProcessorValueTreeState apvts;
+
+    // UI의 Juice Tank가 읽는 간단한 미터 값입니다.
+    // 오디오 스레드와 UI 스레드가 동시에 접근하므로 atomic을 사용합니다.
+    float getVisualLevel() const noexcept;
+    float getDuckingDepth() const noexcept;
 
 private:
     //==============================================================================
-    // APVTS에 등록할 파라미터 목록을 만듭니다.
+    // 파라미터 ID
+    //
+    // 이 문자열은 DAW 자동화와 프리셋 저장에 쓰입니다.
+    // 한 번 배포한 뒤에는 바꾸지 않는 것이 좋습니다.
+    struct ParameterIDs
+    {
+        static constexpr const char* mix        = "mix";
+        static constexpr const char* decay      = "decay";
+        static constexpr const char* size       = "size";
+        static constexpr const char* preDelay   = "preDelay";
+        static constexpr const char* lowCut     = "lowCut";
+        static constexpr const char* ducking    = "ducking";
+        static constexpr const char* saturation = "saturation";
+        static constexpr const char* width      = "width";
+        static constexpr const char* damping    = "damping";
+    };
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // Length 노브 인덱스를 PPQ 길이로 바꿉니다.
+    //==============================================================================
+    // 작은 DSP 부품들
     //
-    // PPQ는 "4분음표 기준 박자 위치"입니다.
-    // 1.0 PPQ = 4분음표 1개입니다.
-    static double gridIndexToPpqLength (int gridIndex);
+    // CombFilter와 AllpassFilter는 고전적인 Schroeder/Freeverb 계열 리버브의
+    // 기본 재료입니다. 여러 지연선이 서로 다른 시간으로 울리며 풍성한 꼬리를 만듭니다.
+    class CombFilter
+    {
+    public:
+        void prepare (int delaySamples);
+        void clear() noexcept;
+        float process (float input, float feedback, float damping) noexcept;
 
-    // BPM, sampleRate 같은 값이 정상적인 숫자인지 검사합니다.
+    private:
+        std::vector<float> delayBuffer;
+        int writeIndex = 0;
+        float dampingMemory = 0.0f;
+    };
+
+    class AllpassFilter
+    {
+    public:
+        void prepare (int delaySamples);
+        void clear() noexcept;
+        float process (float input, float feedback) noexcept;
+
+    private:
+        std::vector<float> delayBuffer;
+        int writeIndex = 0;
+    };
+
+    // 한 채널의 리버브 탱크입니다.
+    // Comb 여러 개를 합친 뒤 Allpass로 퍼뜨려 밀도 높은 공간감을 만듭니다.
+    class ChannelReverbTank
+    {
+    public:
+        void prepare (double sampleRate, int stereoSpreadSamples);
+        void clear() noexcept;
+        float process (float input, float feedback, float damping, float diffusion) noexcept;
+
+    private:
+        std::array<CombFilter, 8> combs;
+        std::array<AllpassFilter, 4> allpasses;
+    };
+
+    // 좌우 두 개의 탱크를 묶은 스테레오 리버브입니다.
+    class StereoReverbTank
+    {
+    public:
+        void prepare (double sampleRate);
+        void clear() noexcept;
+
+        void process (float inputLeft,
+                      float inputRight,
+                      float feedback,
+                      float damping,
+                      float size,
+                      float& outputLeft,
+                      float& outputRight) noexcept;
+
+    private:
+        ChannelReverbTank leftTank;
+        ChannelReverbTank rightTank;
+
+        double currentSampleRate = 44100.0;
+        float lfoPhase = 0.0f;
+    };
+
+    // 1-pole high-pass 필터 상태입니다.
+    // Wet 리버브의 저역 뭉침을 줄이기 위해 두 번 직렬로 사용합니다.
+    struct HighPassState
+    {
+        float previousInput = 0.0f;
+        float previousOutput = 0.0f;
+
+        void clear() noexcept;
+    };
+
+    //==============================================================================
+    // 내부 처리 함수
+    float getParameterValue (const char* parameterID) const noexcept;
+    void resetSmoothers();
+    void clearDspState();
+
+    float processPreDelay (int channel, float input, int delaySamples) noexcept;
+    void advancePreDelay() noexcept;
+
+    static float processHighPass (HighPassState& state, float input, float coefficient) noexcept;
+    static float calculateHighPassCoefficient (float cutoffHz, double sampleRate) noexcept;
+    static float saturateSample (float input, float amount) noexcept;
+    static float softLimitSample (float input) noexcept;
+    static float smoothStep (float value) noexcept;
     static bool isFiniteAndPositive (double value) noexcept;
 
-    // 0.0~1.0 사이 값을 부드러운 S자 곡선으로 바꿉니다.
-    //
-    // 일반 직선 변화보다 시작과 끝이 자연스러워서
-    // 클릭 방지, 어택 보정, 테일 정리 같은 곳에 사용합니다.
-    static float smoothStep (float value) noexcept;
-
-    // 마스터링 체인 마지막에서 쓰는 부드러운 피크 안전장치입니다.
-    //
-    // 벽돌처럼 딱 잘라내는 hard clipping이 아니라,
-    // 큰 피크만 둥글게 눌러서 거친 디지털 클립을 줄입니다.
-    static float softLimitSample (float sample) noexcept;
-
-    // Circular Buffer 인덱스가 범위를 벗어났을 때 다시 정상 범위로 감싸줍니다.
-    int wrapBufferIndex (int index) const noexcept;
-
-    // 내부 재생 상태를 안전하게 초기화합니다.
-    void resetRepeaterState() noexcept;
-
     //==============================================================================
-    // Circular Buffer
-    //
-    // Circular Buffer는 "빙글빙글 도는 녹음 테이프"라고 생각하면 됩니다.
-    //
-    // 예를 들어 버퍼 크기가 10000 samples라면:
-    // - 0번 위치부터 9999번 위치까지 오디오를 저장합니다.
-    // - 끝에 도착하면 다시 0번 위치부터 덮어씁니다.
-    //
-    // Beat Repeater는 이 버퍼에 과거 오디오를 계속 저장해두고,
-    // DAW 박자선에 맞춰 특정 구간을 다시 읽어서 반복 재생합니다.
-    juce::AudioBuffer<float> circularBuffer;
+    // DSP 상태
+    StereoReverbTank reverbTank;
 
-    // Circular Buffer의 전체 길이입니다.
-    int circularBufferSize = 0;
+    juce::AudioBuffer<float> preDelayBuffer;
+    int preDelayWritePosition = 0;
+    int maxPreDelaySamples = 1;
 
-    // 지금 입력 오디오를 Circular Buffer의 어느 위치에 쓸지 나타냅니다.
-    int writePosition = 0;
+    std::array<HighPassState, 2> lowCutStageA;
+    std::array<HighPassState, 2> lowCutStageB;
 
-    // 반복 재생할 오디오 조각이 Circular Buffer 안에서 시작되는 위치입니다.
-    int repeatStartPosition = 0;
-
-    // 현재 Grid 설정을 sample 단위로 바꾼 길이입니다.
-    //
-    // 예:
-    // 120 BPM, 44.1kHz에서 1/4 note는 약 22050 samples입니다.
-    int repeatLengthSamples = 1;
-
-    // 반복 조각 안에서 현재 몇 번째 sample을 읽고 있는지 나타냅니다.
-    int repeatPhase = 0;
-
-    //==============================================================================
-    // DAW와 동기화하기 위한 상태값입니다.
-
-    // 현재 sample rate입니다. 예: 44100, 48000, 96000
     double sampleRateHz = 44100.0;
+    float duckingEnvelope = 0.0f;
 
-    // 이전 processBlock에서 확인한 Grid 칸 번호입니다.
-    //
-    // DAW의 PPQ 위치를 Grid 길이로 나누면 현재 몇 번째 Grid 칸인지 알 수 있습니다.
-    // 이 값이 바뀌는 순간이 "새 반복 조각을 잡아야 하는 시점"입니다.
-    double lastGridCell = -1.0;
+    // 파라미터가 갑자기 튀면 클릭이 생길 수 있으므로 짧게 부드럽게 움직입니다.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mixSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> decaySmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> sizeSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> preDelaySmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> lowCutSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> duckingSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> saturationSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> widthSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> dampingSmoother;
 
-    // 사용자가 Grid 파라미터를 바꿨는지 감지하기 위한 값입니다.
-    int lastGridParameterIndex = -1;
+    std::atomic<float> visualLevel { 0.0f };
+    std::atomic<float> visualDuckingDepth { 0.0f };
 
-    // 플러그인이 지금까지 Circular Buffer에 써온 총 sample 수입니다.
-    //
-    // 아직 충분한 오디오가 쌓이지 않았는데 반복을 시도하면 쓰레기 값이 나올 수 있으므로,
-    // 이 값을 이용해 "반복할 만큼 과거 오디오가 충분한지" 확인합니다.
-    int64_t totalSamplesWritten = 0;
-
-    // DAW가 PPQ 위치를 제공하지 않는 예외 상황을 위한 임시 sample counter입니다.
-    //
-    // 대부분의 DAW는 PPQ를 제공하지만,
-    // 일부 환경이나 테스트 상황에서는 값이 없을 수 있습니다.
-    int64_t fallbackSampleCounter = 0;
-
-    //==============================================================================
-    // Soft/Warm Low-pass Filter 상태입니다.
-    //
-    // 1-pole LPF는 바로 이전 출력값을 기억해야 합니다.
-    // 채널마다 이전 값이 다르므로 vector로 채널 수만큼 보관합니다.
-    std::vector<float> lowpassState;
-
-    //==============================================================================
-    // Mastering Macro 상태값들
-    //
-    // 아래 상태값들은 사용자가 직접 만지는 별도 노브가 아닙니다.
-    // Length 노브가 짧아질수록 자동으로 더 적극적으로 동작하는
-    // "원 노브 마스터링 매크로"의 내부 기억 공간입니다.
-
-    // 반복음의 과한 저역을 살짝 정리하기 위한 저역 추적 상태입니다.
-    // 짧은 반복에서 킥/베이스가 겹쳐 뭉개지는 느낌을 줄이는 데 사용합니다.
-    std::vector<float> wetLowControlState;
-
-    // 원본 입력의 저역을 아주 조금 보존하기 위한 상태입니다.
-    // 반복 효과가 강해져도 곡의 중심 저역이 무너지지 않도록 도와줍니다.
-    std::vector<float> dryLowAnchorState;
-
-    // 반복음의 어택과 존재감을 보정하기 위한 트랜지언트 추적 상태입니다.
-    // 너무 죽은 반복음을 조금 더 앞으로 나오게 만드는 데 사용합니다.
-    std::vector<float> transientDetectorState;
-
-    //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BeatRepeaterAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuiceReverbAudioProcessor)
 };
