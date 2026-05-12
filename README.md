@@ -45,6 +45,19 @@ GitHub 저장소에서 `Actions` 탭으로 이동한 뒤 `Build JuiceReverb VST3
 - `JuiceReverb-Windows-VST3.zip`
 - `JuiceReverb-macOS-Universal-VST3.zip`
 
+## macOS 설치
+
+`JuiceReverb-macOS-Universal-VST3.zip`을 내려받아 압축을 풀면 `JuiceReverb.vst3` 번들이 나옵니다.
+
+이 파일을 아래 폴더 중 하나에 넣으면 VST3를 지원하는 macOS DAW에서 스캔할 수 있습니다.
+
+```text
+~/Library/Audio/Plug-Ins/VST3
+/Library/Audio/Plug-Ins/VST3
+```
+
+이 빌드는 Apple Silicon과 Intel Mac을 모두 지원하는 Universal VST3입니다. Logic Pro는 VST3가 아니라 Audio Unit을 사용하므로, Logic용 플러그인이 필요하면 AU 포맷을 추가해야 합니다.
+
 태그로 릴리스를 만들고 싶다면:
 
 ```bash

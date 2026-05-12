@@ -20,6 +20,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# macOS에서 빌드할 때 너무 최신 macOS 전용 바이너리가 되지 않도록 최소 지원 버전을 정합니다.
+# GitHub Actions의 macos-latest에서 빌드해도 macOS 11 Big Sur 이상에서 로드되도록 돕습니다.
+if (APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
+endif()
+
 # ==============================================================================
 # JUCE 자동 다운로드
 #
