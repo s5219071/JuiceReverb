@@ -326,6 +326,12 @@ void JuiceReverbAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juiceGreen.withAlpha (0.25f));
     g.drawLine (34.0f, 62.0f, static_cast<float> (getWidth() - 34), 62.0f, 1.0f);
+
+    g.setColour (labMutedText.withAlpha (0.72f));
+    g.setFont (juce::Font (juce::FontOptions (12.0f)));
+    g.drawText ("Made by Kino",
+                getLocalBounds().reduced (24).removeFromBottom (24),
+                juce::Justification::centredRight);
 }
 
 void JuiceReverbAudioProcessorEditor::resized()
