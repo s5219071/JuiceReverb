@@ -58,6 +58,27 @@ GitHub 저장소에서 `Actions` 탭으로 이동한 뒤 `Build JuiceReverb VST3
 
 이 빌드는 Apple Silicon과 Intel Mac을 모두 지원하는 Universal VST3입니다. Logic Pro는 VST3가 아니라 Audio Unit을 사용하므로, Logic용 플러그인이 필요하면 AU 포맷을 추가해야 합니다.
 
+## macOS 보안 경고와 notarization
+
+macOS에서 "악성 소프트웨어를 확인할 수 없음", "개발자를 확인할 수 없음", "업데이트가 필요함" 같은 경고가 뜨면, 플러그인이 Apple Developer ID로 서명되고 Apple notarization을 통과한 빌드인지 확인해야 합니다.
+
+GitHub Actions는 Apple 인증서가 없을 때 ad-hoc 서명 빌드를 만듭니다. 이 빌드는 개발 테스트에는 쓸 수 있지만, 공개 배포용으로는 부족하며 macOS Gatekeeper가 막을 수 있습니다.
+
+공개 배포용 macOS VST3를 만들려면 GitHub 저장소의 `Settings > Secrets and variables > Actions`에 아래 secrets를 추가합니다.
+
+```text
+APPLE_CERTIFICATE_BASE64
+APPLE_CERTIFICATE_PASSWORD
+APPLE_CODESIGN_IDENTITY
+APPLE_ID
+APPLE_TEAM_ID
+APPLE_APP_SPECIFIC_PASSWORD
+```
+
+`APPLE_CERTIFICATE_BASE64`는 Apple Developer 계정에서 만든 `Developer ID Application` 인증서를 `.p12`로 내보낸 뒤 base64로 변환한 값입니다. `APPLE_APP_SPECIFIC_PASSWORD`는 Apple ID의 app-specific password입니다.
+
+secrets를 추가한 뒤 `Build JuiceReverb VST3` 워크플로우를 다시 실행하면 macOS job이 Developer ID 서명, `notarytool` 제출, `stapler` 티켓 첨부를 시도합니다. 이 과정을 통과한 `JuiceReverb-macOS-Universal-VST3.zip`을 배포해야 macOS Gatekeeper 경고를 줄일 수 있습니다.
+
 태그로 릴리스를 만들고 싶다면:
 
 ```bash

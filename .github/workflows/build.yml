@@ -118,6 +118,13 @@ jobs:
 
       - name: Package macOS VST3
         shell: bash
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -133,10 +140,73 @@ jobs:
           mkdir -p artifacts dist
           cp -R "${vst3}" artifacts/
 
-          # 공개 CI에는 Apple Developer ID 인증서가 없으므로 ad-hoc codesign만 적용합니다.
-          # 상업 배포 단계에서는 Apple notarization을 추가하는 것이 좋습니다.
-          codesign --force --deep --sign - "artifacts/JuiceReverb.vst3"
+          signing_ready="false"
+
+          if [[ -n "${APPLE_CERTIFICATE_BASE64:-}" && -n "${APPLE_CERTIFICATE_PASSWORD:-}" ]]; then
+            signing_ready="true"
+          fi
+
+          if [[ "${signing_ready}" == "true" ]]; then
+            echo "Developer ID certificate found. Importing certificate and signing JuiceReverb.vst3."
+
+            keychain_password="$(uuidgen)"
+            keychain_path="${RUNNER_TEMP}/juicereverb-signing.keychain-db"
+            certificate_path="${RUNNER_TEMP}/developer-id-application.p12"
+
+            echo "${APPLE_CERTIFICATE_BASE64}" | base64 -D > "${certificate_path}"
+
+            security create-keychain -p "${keychain_password}" "${keychain_path}"
+            security set-keychain-settings -lut 21600 "${keychain_path}"
+            security unlock-keychain -p "${keychain_password}" "${keychain_path}"
+            security import "${certificate_path}" -k "${keychain_path}" -P "${APPLE_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign
+            security list-keychains -d user -s "${keychain_path}" login.keychain-db
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain_path}"
+
+            signing_identity="${APPLE_CODESIGN_IDENTITY:-}"
+
+            if [[ -z "${signing_identity}" ]]; then
+              signing_identity="$(security find-identity -v -p codesigning "${keychain_path}" | awk -F '"' '/Developer ID Application/ { print $2; exit }')"
+            fi
+
+            if [[ -z "${signing_identity}" ]]; then
+              echo "No Developer ID Application signing identity was found in the imported certificate."
+              exit 1
+            fi
+
+            codesign --force --deep --timestamp --options runtime --sign "${signing_identity}" "artifacts/JuiceReverb.vst3"
+          else
+            echo "Apple Developer ID certificate secrets were not configured."
+            echo "Creating an ad-hoc signed VST3. This can trigger Gatekeeper malware-check/update warnings on macOS."
+            codesign --force --deep --sign - "artifacts/JuiceReverb.vst3"
+          fi
+
           codesign --verify --deep --strict "artifacts/JuiceReverb.vst3"
+
+          notarization_ready="false"
+
+          if [[ "${signing_ready}" == "true" && -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
+            notarization_ready="true"
+          fi
+
+          if [[ "${notarization_ready}" == "true" ]]; then
+            echo "Submitting JuiceReverb.vst3 to Apple notarization."
+
+            notary_upload_zip="dist/JuiceReverb-macOS-Universal-VST3-notary-upload.zip"
+            ditto -c -k --sequesterRsrc --keepParent "artifacts/JuiceReverb.vst3" "${notary_upload_zip}"
+
+            xcrun notarytool submit "${notary_upload_zip}" \
+              --apple-id "${APPLE_ID}" \
+              --team-id "${APPLE_TEAM_ID}" \
+              --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+              --wait
+
+            xcrun stapler staple -v "artifacts/JuiceReverb.vst3"
+            xcrun stapler validate -v "artifacts/JuiceReverb.vst3"
+            rm -f "${notary_upload_zip}"
+          else
+            echo "Apple notarization secrets were not configured."
+            echo "Skipping notarization. Public macOS distribution should use a notarized artifact."
+          fi
 
           ditto -c -k --sequesterRsrc --keepParent "artifacts/JuiceReverb.vst3" "dist/JuiceReverb-macOS-Universal-VST3.zip"
 
