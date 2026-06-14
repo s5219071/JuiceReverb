@@ -129,11 +129,9 @@ void JuiceReverbAudioProcessorEditor::MadLabLookAndFeel::drawRotarySlider
 
 //==============================================================================
 void JuiceReverbAudioProcessorEditor::JuiceTank::setState (float newLevel,
-                                                           float newDucking,
                                                            float newPhase) noexcept
 {
     level = juce::jlimit (0.0f, 1.0f, newLevel);
-    ducking = juce::jlimit (0.0f, 1.0f, newDucking);
     phase = newPhase;
     repaint();
 }
@@ -183,13 +181,13 @@ void JuiceReverbAudioProcessorEditor::JuiceTank::paint (juce::Graphics& g)
                           glass.getX(),
                           glass.getRight());
 
-    // Ducking이 강하게 걸릴수록 위쪽 압력 게이지가 더 어둡게 잠깁니다.
+    // 위쪽 작은 게이지는 현재 wet 레벨을 표시합니다.
     const auto pressure = glass.removeFromTop (14.0f).reduced (6.0f, 3.0f);
     g.setColour (juiceGreen.withAlpha (0.18f));
     g.fillRoundedRectangle (pressure, 4.0f);
 
     g.setColour (juiceGreen.withAlpha (0.75f));
-    g.fillRoundedRectangle (pressure.withWidth (pressure.getWidth() * (1.0f - ducking)), 4.0f);
+    g.fillRoundedRectangle (pressure.withWidth (pressure.getWidth() * level), 4.0f);
 
     g.setColour (juiceGreen.withAlpha (0.82f));
     g.drawRoundedRectangle (bounds.reduced (20.0f, 14.0f), 8.0f, 2.0f);
@@ -220,8 +218,8 @@ JuiceReverbAudioProcessorEditor::JuiceReverbAudioProcessorEditor (JuiceReverbAud
     setupKnob (sizeSlider, sizeLabel, "SIZE", " %");
     setupKnob (preDelaySlider, preDelayLabel, "PRE", " ms");
     setupKnob (lowCutSlider, lowCutLabel, "LOW CUT", " Hz");
-    setupKnob (duckingSlider, duckingLabel, "DUCK", " %");
-    setupKnob (saturationSlider, saturationLabel, "JUICE", " %");
+    setupKnob (midGainSlider, midGainLabel, "MID", " dB");
+    setupKnob (highCutSlider, highCutLabel, "HI CUT", " Hz");
     setupKnob (widthSlider, widthLabel, "WIDTH", " %");
     setupKnob (dampingSlider, dampingLabel, "DAMP", " %");
 
@@ -230,8 +228,8 @@ JuiceReverbAudioProcessorEditor::JuiceReverbAudioProcessorEditor (JuiceReverbAud
     sizeAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "size", sizeSlider);
     preDelayAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "preDelay", preDelaySlider);
     lowCutAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "lowCut", lowCutSlider);
-    duckingAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "ducking", duckingSlider);
-    saturationAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "saturation", saturationSlider);
+    midGainAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "midGain", midGainSlider);
+    highCutAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "highCut", highCutSlider);
     widthAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "width", widthSlider);
     dampingAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "damping", dampingSlider);
 
@@ -244,8 +242,8 @@ JuiceReverbAudioProcessorEditor::~JuiceReverbAudioProcessorEditor()
 
     dampingAttachment = nullptr;
     widthAttachment = nullptr;
-    saturationAttachment = nullptr;
-    duckingAttachment = nullptr;
+    highCutAttachment = nullptr;
+    midGainAttachment = nullptr;
     lowCutAttachment = nullptr;
     preDelayAttachment = nullptr;
     sizeAttachment = nullptr;
@@ -295,7 +293,7 @@ void JuiceReverbAudioProcessorEditor::timerCallback()
     if (tankPhase > juce::MathConstants<float>::twoPi)
         tankPhase -= juce::MathConstants<float>::twoPi;
 
-    juiceTank.setState (tankLevel, audioProcessor.getDuckingDepth(), tankPhase);
+    juiceTank.setState (tankLevel, tankPhase);
 }
 
 //==============================================================================
@@ -320,7 +318,7 @@ void JuiceReverbAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (labMutedText);
     g.setFont (juce::Font (juce::FontOptions (12.0f)));
-    g.drawText ("TRANCE LUSHNESS  |  INTERNAL DUCKING  |  MAD LAB DSP",
+    g.drawText ("TRANCE LUSHNESS  |  LOW / MID / HI TONE  |  MAD LAB DSP",
                 titleArea,
                 juce::Justification::centred);
 
@@ -353,8 +351,8 @@ void JuiceReverbAudioProcessorEditor::resized()
     layoutKnob (mixSlider, mixLabel, { leftX, firstY, knobWidth, knobHeight });
     layoutKnob (decaySlider, decayLabel, { leftX, secondY, knobWidth, knobHeight });
 
-    layoutKnob (duckingSlider, duckingLabel, { rightX, firstY, knobWidth, knobHeight });
-    layoutKnob (saturationSlider, saturationLabel, { rightX, secondY, knobWidth, knobHeight });
+    layoutKnob (lowCutSlider, lowCutLabel, { rightX, firstY, knobWidth, knobHeight });
+    layoutKnob (highCutSlider, highCutLabel, { rightX, secondY, knobWidth, knobHeight });
 
     const int tankWidth = juce::jlimit (280, 390, body.getWidth() - knobWidth * 2 - 64);
     const int tankHeight = 258;
@@ -381,7 +379,7 @@ void JuiceReverbAudioProcessorEditor::resized()
 
     layoutKnob (sizeSlider, sizeLabel, bottomSlots[0]);
     layoutKnob (preDelaySlider, preDelayLabel, bottomSlots[1]);
-    layoutKnob (lowCutSlider, lowCutLabel, bottomSlots[2]);
+    layoutKnob (midGainSlider, midGainLabel, bottomSlots[2]);
     layoutKnob (widthSlider, widthLabel, bottomSlots[3]);
     layoutKnob (dampingSlider, dampingLabel, bottomSlots[4]);
 }

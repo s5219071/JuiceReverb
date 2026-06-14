@@ -2,15 +2,16 @@
 
 JuiceReverb는 JUCE/C++ 기반의 현대적인 VST3 리버브 플러그인입니다.
 
-핵심 목표는 트랜스 음악에 어울리는 넓고 투명한 리버브 꼬리, 원음 펀치를 지키는 Internal Ducking, 따뜻한 Juice Saturation, wet 전용 mastering-grade low-cut, Mid-Side width 컨트롤입니다.
+핵심 목표는 트랜스 음악에 어울리는 넓고 투명한 리버브 꼬리, 정확한 Pre Delay와 Decay Time, wet 전용 Low/Mid/Hi 톤 필터, Mid-Side width 컨트롤입니다.
 
 ## 주요 기능
 
 - APVTS 기반 파라미터 관리와 UI 자동 연결
 - 프리딜레이가 있는 스테레오 리버브 탱크
-- 입력이 강할 때 wet만 내려주는 Internal Ducking
-- 리버브 꼬리에 배음을 더하는 Juice Saturation
-- wet 전용 12dB/oct Low Cut
+- 정확한 0ms 통과와 최대 180ms 범위를 제공하는 Pre Delay
+- 각 comb delay 길이에 맞춰 실제 RT60을 계산하는 Decay Time
+- wet 전용 12dB/oct Low Cut과 Hi Cut
+- wet 전용 1.5kHz Mid Gain
 - wet 전용 Mid-Side Width
 - 아주 어두운 실험실 배경과 형광 초록 Juice Tank UI
 - CMake FetchContent로 JUCE 자동 다운로드

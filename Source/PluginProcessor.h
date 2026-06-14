@@ -15,8 +15,7 @@
 //
 // 설계 철학:
 // - Dry 경로는 최대한 보존해서 원음의 펀치가 무너지지 않게 합니다.
-// - Wet 경로에만 리버브, 로우컷, 새추레이션, 스테레오 확장을 적용합니다.
-// - 입력 신호가 강할 때 wet만 자동으로 내려주는 Internal Ducking을 넣습니다.
+// - Wet 경로에만 리버브, Low/Mid/Hi 필터, 스테레오 확장을 적용합니다.
 // - 모든 노브 값은 AudioProcessorValueTreeState(APVTS)로 관리합니다.
 //==============================================================================
 class JuiceReverbAudioProcessor final : public juce::AudioProcessor
@@ -64,7 +63,6 @@ public:
     // UI의 Juice Tank가 읽는 간단한 미터 값입니다.
     // 오디오 스레드와 UI 스레드가 동시에 접근하므로 atomic을 사용합니다.
     float getVisualLevel() const noexcept;
-    float getDuckingDepth() const noexcept;
 
 private:
     //==============================================================================
@@ -79,8 +77,8 @@ private:
         static constexpr const char* size       = "size";
         static constexpr const char* preDelay   = "preDelay";
         static constexpr const char* lowCut     = "lowCut";
-        static constexpr const char* ducking    = "ducking";
-        static constexpr const char* saturation = "saturation";
+        static constexpr const char* midGain    = "midGain";
+        static constexpr const char* highCut    = "highCut";
         static constexpr const char* width      = "width";
         static constexpr const char* damping    = "damping";
     };
@@ -95,14 +93,15 @@ private:
     class CombFilter
     {
     public:
-        void prepare (int delaySamples);
+        void prepare (int delaySamples, double sampleRate);
         void clear() noexcept;
-        float process (float input, float feedback, float damping) noexcept;
+        float process (float input, float decaySeconds, float damping) noexcept;
 
     private:
         std::vector<float> delayBuffer;
         int writeIndex = 0;
         float dampingMemory = 0.0f;
+        float delaySeconds = 0.01f;
     };
 
     class AllpassFilter
@@ -124,7 +123,7 @@ private:
     public:
         void prepare (double sampleRate, int stereoSpreadSamples);
         void clear() noexcept;
-        float process (float input, float feedback, float damping, float diffusion) noexcept;
+        float process (float input, float decaySeconds, float damping, float diffusion) noexcept;
 
     private:
         std::array<CombFilter, 8> combs;
@@ -140,7 +139,7 @@ private:
 
         void process (float inputLeft,
                       float inputRight,
-                      float feedback,
+                      float decaySeconds,
                       float damping,
                       float size,
                       float& outputLeft,
@@ -164,6 +163,32 @@ private:
         void clear() noexcept;
     };
 
+    // Wet 리버브의 Hi Cut에 사용하는 간단한 1-pole low-pass 상태입니다.
+    struct LowPassState
+    {
+        float memory = 0.0f;
+
+        void clear() noexcept;
+    };
+
+    // Mid Gain은 1.5kHz 부근을 올리거나 내리는 peaking EQ입니다.
+    struct BiquadCoefficients
+    {
+        float b0 = 1.0f;
+        float b1 = 0.0f;
+        float b2 = 0.0f;
+        float a1 = 0.0f;
+        float a2 = 0.0f;
+    };
+
+    struct BiquadState
+    {
+        float z1 = 0.0f;
+        float z2 = 0.0f;
+
+        void clear() noexcept;
+    };
+
     //==============================================================================
     // 내부 처리 함수
     float getParameterValue (const char* parameterID) const noexcept;
@@ -174,10 +199,15 @@ private:
     void advancePreDelay() noexcept;
 
     static float processHighPass (HighPassState& state, float input, float coefficient) noexcept;
+    static float processLowPass (LowPassState& state, float input, float coefficient) noexcept;
+    static float processBiquad (BiquadState& state,
+                                float input,
+                                const BiquadCoefficients& coefficients) noexcept;
     static float calculateHighPassCoefficient (float cutoffHz, double sampleRate) noexcept;
-    static float saturateSample (float input, float amount) noexcept;
+    static float calculateLowPassCoefficient (float cutoffHz, double sampleRate) noexcept;
+    static BiquadCoefficients calculateMidPeakCoefficients (float gainDb,
+                                                            double sampleRate) noexcept;
     static float softLimitSample (float input) noexcept;
-    static float smoothStep (float value) noexcept;
     static bool isFiniteAndPositive (double value) noexcept;
 
     //==============================================================================
@@ -190,9 +220,11 @@ private:
 
     std::array<HighPassState, 2> lowCutStageA;
     std::array<HighPassState, 2> lowCutStageB;
+    std::array<LowPassState, 2> highCutStageA;
+    std::array<LowPassState, 2> highCutStageB;
+    std::array<BiquadState, 2> midFilterState;
 
     double sampleRateHz = 44100.0;
-    float duckingEnvelope = 0.0f;
 
     // 파라미터가 갑자기 튀면 클릭이 생길 수 있으므로 짧게 부드럽게 움직입니다.
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mixSmoother;
@@ -200,13 +232,12 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> sizeSmoother;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> preDelaySmoother;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> lowCutSmoother;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> duckingSmoother;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> saturationSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> midGainSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> highCutSmoother;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> widthSmoother;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> dampingSmoother;
 
     std::atomic<float> visualLevel { 0.0f };
-    std::atomic<float> visualDuckingDepth { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuiceReverbAudioProcessor)
 };

@@ -43,17 +43,16 @@ private:
     //==============================================================================
     // 중앙 Juice Tank 시각화입니다.
     //
-    // Processor가 제공하는 리버브 레벨과 ducking 값을 받아 초록 액체 높이와
+    // Processor가 제공하는 리버브 레벨을 받아 초록 액체 높이와
     // 표면 파동을 그립니다. 실제 오디오를 분석하지는 않고, 안전한 atomic 미터만 읽습니다.
     class JuiceTank final : public juce::Component
     {
     public:
-        void setState (float newLevel, float newDucking, float newPhase) noexcept;
+        void setState (float newLevel, float newPhase) noexcept;
         void paint (juce::Graphics& g) override;
 
     private:
         float level = 0.0f;
-        float ducking = 0.0f;
         float phase = 0.0f;
     };
 
@@ -79,8 +78,8 @@ private:
     juce::Slider sizeSlider;
     juce::Slider preDelaySlider;
     juce::Slider lowCutSlider;
-    juce::Slider duckingSlider;
-    juce::Slider saturationSlider;
+    juce::Slider midGainSlider;
+    juce::Slider highCutSlider;
     juce::Slider widthSlider;
     juce::Slider dampingSlider;
 
@@ -89,8 +88,8 @@ private:
     juce::Label sizeLabel;
     juce::Label preDelayLabel;
     juce::Label lowCutLabel;
-    juce::Label duckingLabel;
-    juce::Label saturationLabel;
+    juce::Label midGainLabel;
+    juce::Label highCutLabel;
     juce::Label widthLabel;
     juce::Label dampingLabel;
 
@@ -99,8 +98,8 @@ private:
     std::unique_ptr<SliderAttachment> sizeAttachment;
     std::unique_ptr<SliderAttachment> preDelayAttachment;
     std::unique_ptr<SliderAttachment> lowCutAttachment;
-    std::unique_ptr<SliderAttachment> duckingAttachment;
-    std::unique_ptr<SliderAttachment> saturationAttachment;
+    std::unique_ptr<SliderAttachment> midGainAttachment;
+    std::unique_ptr<SliderAttachment> highCutAttachment;
     std::unique_ptr<SliderAttachment> widthAttachment;
     std::unique_ptr<SliderAttachment> dampingAttachment;
 
