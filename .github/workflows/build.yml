@@ -44,7 +44,10 @@ permissions:
 jobs:
   build-windows-vst3:
     name: Build Windows VST3
-    runs-on: windows-latest
+    # windows-latest는 2026년 6월부터 Visual Studio 2026 이미지로 전환되었습니다.
+    # JuiceReverb는 Visual Studio 17 2022 생성기를 사용하므로 VS 2022가 보장되는
+    # windows-2022 러너를 명시적으로 사용합니다.
+    runs-on: windows-2022
 
     steps:
       - name: Checkout repository
@@ -54,6 +57,11 @@ jobs:
         shell: pwsh
         run: |
           cmake --version
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
 
       - name: Configure CMake
         shell: pwsh

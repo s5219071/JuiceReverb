@@ -16,6 +16,7 @@ JuiceReverb는 JUCE/C++ 기반의 현대적인 VST3 리버브 플러그인입니
 - 아주 어두운 실험실 배경과 형광 초록 Juice Tank UI
 - CMake FetchContent로 JUCE 자동 다운로드
 - GitHub Actions Windows/macOS VST3 클라우드 빌드
+- Visual Studio 2022가 보장되는 `windows-2022` GitHub Actions 러너 사용
 
 ## 파일 구조
 
